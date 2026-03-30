@@ -22,7 +22,7 @@ from mavsdk.offboard import PositionNedYaw
 APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
-LOOKAHEAD_DIST = 4.0    # meters ahead on path for blending
+LOOKAHEAD_DIST = 6.0    # meters ahead on path for blending
 COMMAND_RATE_HZ = 30
 
 
@@ -64,7 +64,7 @@ async def run(drone, gates):
             to_next = next_wp - target
             seg_len = np.linalg.norm(to_next)
             if seg_len > 0:
-                blend = min(remaining / seg_len, 0.6)
+                blend = min(remaining / seg_len, 0.8)
                 cmd_target = target + blend * to_next
 
         cmd_delta = cmd_target - position
