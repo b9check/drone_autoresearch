@@ -13,3 +13,25 @@ Empirical discoveries about the simulator, drone, track, and control problem. Th
 - Gate passage detection works well: all passages within 0.3m of center.
 - The sim's position controller tracks PositionNedYaw setpoints quickly — drone moves at roughly 5-7 m/s between gates with the baseline code.
 - GATE_REACHED_DIST=2.0m in pilot.py switches to the next gate before actually passing through — this works because the gate tracker in prepare.py uses plane-crossing detection independently.
+
+## 2026-03-29 — Gate 8 Trajectory Analysis (run_0004.npz)
+
+- Drone crosses gate 8's plane at position ~[-2.2, 3.5, -2.0], which is **2.68m from gate center** — outside the 1.5m GATE_PASS_RADIUS. This is why gate 8 is never registered.
+- The PX4 position controller curves the path when transitioning from gate 7 momentum to the gate 8 target. The drone doesn't fly a straight line — it arcs, and the arc crosses the gate plane off-center.
+- After crossing the plane, the drone settles near the through-point (~[1.5, 2.4, -2]) and hovers there until the 15s per-gate timeout fires. It never re-crosses the plane.
+- Gate 8 normal is [0.5, -0.87, 0] — nearly aligned with the approach direction from gate 7 (8° difference). The geometry is fine; it's the PX4 controller's smooth transition that causes the off-center crossing.
+
+## 2026-03-29 — VelocityNedYaw is Unstable
+
+- VelocityNedYaw at 5 m/s caused severe oscillation. Drone bounced between gates 2 and 3 for ~20s before slowly progressing. Only 2/8 gates in 73s.
+- PositionNedYaw is far more stable — the sim's inner-loop position controller provides damping. Stick with PositionNedYaw for Phase A.
+
+## 2026-03-29 — Approach+Through Waypoints Fix Gate 8
+
+- Adding approach waypoints (3m before gate along -normal) and through waypoints (2m past gate along +normal) achieves 8/8 gates in 21.2s.
+- All gate passages within 0.39m of center. Gate 8: 0.05m from center (was 2.68m with baseline).
+- The approach→through line is collinear with the gate normal and passes through gate center by construction.
+- Key insight: through-offsets alone don't fix misalignment. The APPROACH waypoint is what forces the PX4 controller to get the drone on the correct heading before the gate plane.
+- Lap time increased from ~14.7s (7 gates) to 21.2s (8 gates) — the extra waypoints add path length. Average 2.65s/gate vs 2.1s/gate baseline.
+- Consecutive through→approach distances range from 5.2m to 7.3m, all safely above GATE_REACHED_DIST=2.0m.
+- Gate 8 alignment depends on gate 7's through waypoint setting up the heading. Approach+through for gate 8 alone (centers for 1-7) still misses — the drone's uncontrolled heading from gate 7 center causes curving. Must use approach+through for ALL gates.
