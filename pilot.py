@@ -1,11 +1,9 @@
 """
-pilot.py — Approach+through waypoint strategy for reliable gate passage.
+pilot.py — Targeted approach+through for gate 8 only.
 
-For each gate, two waypoints align the drone with the gate normal:
-1. Approach point: 3m before gate along -normal (align heading)
-2. Through point: 2m past gate along +normal (ensure passage)
-
-The approach->through line passes exactly through gate center.
+Gates 1-7: target gate centers (fast, already reliable).
+Gate 8: approach waypoint (3m before) + through waypoint (2m past) along
+normal to fix the PX4 controller curvature issue.
 """
 
 import asyncio
@@ -18,21 +16,23 @@ from mavsdk.offboard import PositionNedYaw
 # CONFIGURATION
 # ============================================================================
 
-APPROACH_DIST = 3.0     # meters before gate along -normal
-THROUGH_DIST = 2.0      # meters past gate along +normal
-GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
+GATE_REACHED_DIST = 2.0
 COMMAND_RATE_HZ = 30
+GATE8_APPROACH = 3.0    # meters before gate 8 along -normal
+GATE8_THROUGH = 2.0     # meters past gate 8 along +normal
 
 
 async def run(drone, gates):
-    """Fly through all gates using approach+through waypoints."""
-    # Build waypoint sequence: approach + through per gate
+    """Fly through gates 1-7 directly, use approach+through for gate 8."""
     waypoints = []
-    for gate in gates:
-        n = gate["normal"]
-        c = gate["position"]
-        waypoints.append(c - APPROACH_DIST * n)
-        waypoints.append(c + THROUGH_DIST * n)
+    for i, gate in enumerate(gates):
+        if i == 7:  # Gate 8: approach + through
+            n = gate["normal"]
+            c = gate["position"]
+            waypoints.append(c - GATE8_APPROACH * n)
+            waypoints.append(c + GATE8_THROUGH * n)
+        else:
+            waypoints.append(gate["position"])
 
     idx = 0
     while idx < len(waypoints):
