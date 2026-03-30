@@ -1,11 +1,11 @@
 """
-pilot.py — MUTABLE autonomy stack for autoresearch-drone.
+pilot.py — Approach+through waypoint strategy for reliable gate passage.
 
-The agent modifies this file to improve lap times.
+For each gate, two waypoints align the drone with the gate normal:
+1. Approach point: 3m before gate along -normal (align heading)
+2. Through point: 2m past gate along +normal (ensure passage)
 
-This baseline implementation: simple waypoint following through gate centers
-using SET_POSITION_TARGET_LOCAL_NED. It is intentionally naive — the agent
-should improve everything about it.
+The approach->through line passes exactly through gate center.
 """
 
 import asyncio
@@ -15,53 +15,41 @@ from mavsdk.offboard import PositionNedYaw
 
 
 # ============================================================================
-# CONFIGURATION — tune these or replace the entire approach
+# CONFIGURATION
 # ============================================================================
 
-APPROACH_SPEED = 3.0        # m/s — how fast to fly toward gates
-GATE_REACHED_DIST = 2.0     # meters — how close before switching to next gate
-COMMAND_RATE_HZ = 30        # how often to send commands
+APPROACH_DIST = 3.0     # meters before gate along -normal
+THROUGH_DIST = 2.0      # meters past gate along +normal
+GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
+COMMAND_RATE_HZ = 30
 
 
 async def run(drone, gates):
-    """
-    Fly through all gates in sequence.
+    """Fly through all gates using approach+through waypoints."""
+    # Build waypoint sequence: approach + through per gate
+    waypoints = []
+    for gate in gates:
+        n = gate["normal"]
+        c = gate["position"]
+        waypoints.append(c - APPROACH_DIST * n)
+        waypoints.append(c + THROUGH_DIST * n)
 
-    Args:
-        drone: MAVSDK System object, already in offboard mode.
-        gates: list of gate dicts, each with:
-            - position: np.array([x, y, z]) in NED
-            - normal: np.array([nx, ny, nz]) — direction to fly through
-            - width: float
-            - height: float
-            - label: str
-    """
-    current_gate_idx = 0
-
-    while current_gate_idx < len(gates):
-        gate = gates[current_gate_idx]
-        target = gate["position"]
-
-        # Get current position
+    idx = 0
+    while idx < len(waypoints):
+        target = waypoints[idx]
         position = await get_position(drone)
         if position is None:
             await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
             continue
 
-        # Distance to gate
         delta = target - position
         distance = np.linalg.norm(delta)
 
-        # Check if we've reached this gate
         if distance < GATE_REACHED_DIST:
-            current_gate_idx += 1
+            idx += 1
             continue
 
-        # Compute yaw to face the gate
-        yaw_rad = math.atan2(delta[1], delta[0])
-        yaw_deg = math.degrees(yaw_rad)
-
-        # Send position setpoint
+        yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
         await drone.offboard.set_position_ned(
             PositionNedYaw(
                 north_m=target[0],
