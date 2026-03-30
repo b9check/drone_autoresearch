@@ -1,32 +1,30 @@
 """
 pilot.py — Autonomy stack for autoresearch-drone.
 
-Velocity-based gate navigation with two-phase targeting:
-- Far from gate: aim at gate center (correct approach angle)
-- Close to gate: aim past gate along normal (ensures plane crossing)
+Position-based waypoint following with plane-crossing gate detection.
+Targets a point past each gate center (along approach direction from
+the previous gate) to ensure the drone flies through the gate plane.
 """
 
 import asyncio
 import math
 import numpy as np
-from mavsdk.offboard import VelocityNedYaw
+from mavsdk.offboard import PositionNedYaw
 
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
-APPROACH_SPEED = 5.0        # m/s — cruise speed toward gates
-GATE_REACHED_DIST = 2.0     # meters — advance to next gate when past plane and this close
-CLOSE_DIST = 5.0            # meters — switch from center to through-point targeting
-THROUGH_OFFSET = 3.0        # meters past gate center along normal
+GATE_REACHED_DIST = 2.5     # meters — advance when past plane and within this distance
+THROUGH_OFFSET = 2.0        # meters past gate center along approach direction
 COMMAND_RATE_HZ = 30        # command loop rate
 MAX_TIME_PER_GATE = 15.0    # seconds before skipping a gate
 RUN_TIMEOUT = 300.0         # total pilot runtime limit
 
 
 async def run(drone, gates):
-    """Fly through all gates using velocity commands."""
+    """Fly through all gates using position commands with plane-crossing detection."""
     import time as _time
 
     current_gate_idx = 0
@@ -47,47 +45,48 @@ async def run(drone, gates):
             await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
             continue
 
-        # Gate passage check: past plane and close to center
-        to_gate = gate["position"] - position
-        dist_to_gate = np.linalg.norm(to_gate)
-        past_plane = np.dot(position - gate["position"], gate["normal"]) > 0
+        # Gate passage: require crossing the gate plane AND being close
+        to_pos = position - gate["position"]
+        past_plane = np.dot(to_pos, gate["normal"]) > 0
+        dist = np.linalg.norm(to_pos)
 
-        if past_plane and dist_to_gate < GATE_REACHED_DIST:
+        if past_plane and dist < GATE_REACHED_DIST:
             current_gate_idx += 1
             gate_start = _time.time()
             continue
 
-        # Two-phase targeting:
-        # Far away -> aim at gate center (correct approach angle)
-        # Close or past -> aim at through-point (fly through the plane)
-        if dist_to_gate < CLOSE_DIST or past_plane:
-            target = gate["position"] + gate["normal"] * THROUGH_OFFSET
+        # Target: point past gate center along approach direction
+        # This ensures the drone flies THROUGH the gate, not just to it
+        if current_gate_idx > 0:
+            prev_pos = gates[current_gate_idx - 1]["position"]
         else:
-            target = gate["position"]
-
-        # Velocity toward target
-        to_target = target - position
-        dist_to_target = np.linalg.norm(to_target)
-        if dist_to_target > 0.1:
-            direction = to_target / dist_to_target
+            prev_pos = np.array([0.0, 0.0, -2.0])
+        approach = gate["position"] - prev_pos
+        approach_len = np.linalg.norm(approach)
+        if approach_len > 0.01:
+            approach_dir = approach / approach_len
         else:
-            direction = gate["normal"]
+            approach_dir = gate["normal"]
 
-        vel = direction * APPROACH_SPEED
-        yaw_deg = math.degrees(math.atan2(direction[1], direction[0]))
+        target = gate["position"] + approach_dir * THROUGH_OFFSET
 
-        await drone.offboard.set_velocity_ned(VelocityNedYaw(
-            north_m_s=vel[0],
-            east_m_s=vel[1],
-            down_m_s=vel[2],
-            yaw_deg=yaw_deg,
-        ))
+        delta = target - position
+        yaw_rad = math.atan2(delta[1], delta[0])
+        yaw_deg = math.degrees(yaw_rad)
+
+        await drone.offboard.set_position_ned(
+            PositionNedYaw(
+                north_m=target[0],
+                east_m=target[1],
+                down_m=target[2],
+                yaw_deg=yaw_deg,
+            )
+        )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
 
-    # Hold briefly to let gate tracker register final passage
-    await drone.offboard.set_velocity_ned(VelocityNedYaw(0.0, 0.0, 0.0, 0.0))
-    for _ in range(60):
+    # Hold position briefly to let gate tracker register final passage
+    for _ in range(90):
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
 
 
