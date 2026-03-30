@@ -52,19 +52,20 @@ async def run(drone, gates):
             idx += 1
             continue
 
-        # Lookahead: blend toward next waypoint ONLY on through->approach
-        # segments (odd idx targeting through point, next is approach).
-        # Never blend on approach->through (even idx) to preserve alignment.
-        is_through_wp = (idx % 2 == 1)  # odd = through point
+        # Lookahead blending toward next waypoint
+        # Through->approach (between gates): aggressive blend (0.8)
+        # Approach->through (gate passage): gentle blend (0.3) to preserve alignment
+        is_through_wp = (idx % 2 == 1)
         cmd_target = target
+        max_blend = 0.8 if is_through_wp else 0.3
 
-        if is_through_wp and idx + 1 < len(waypoints) and distance < LOOKAHEAD_DIST:
+        if idx + 1 < len(waypoints) and distance < LOOKAHEAD_DIST:
             remaining = LOOKAHEAD_DIST - distance
             next_wp = waypoints[idx + 1]
             to_next = next_wp - target
             seg_len = np.linalg.norm(to_next)
             if seg_len > 0:
-                blend = min(remaining / seg_len, 0.8)
+                blend = min(remaining / seg_len, max_blend)
                 cmd_target = target + blend * to_next
 
         cmd_delta = cmd_target - position
