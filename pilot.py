@@ -80,9 +80,10 @@ def walk_along_path(waypoints, idx, position, lookahead):
     j = idx + 1
 
     while j < len(waypoints) and remaining > 0:
-        # Stop at approach waypoints (even indices) — they're alignment-critical
+        # At approach waypoints (even indices), reduce remaining lookahead
+        # to pull the target toward the approach point (alignment-critical)
         if j % 2 == 0 and j > idx + 1:
-            return waypoints[j]
+            remaining *= 0.3  # bleed 70% of remaining lookahead
 
         seg = waypoints[j] - prev
         seg_len = np.linalg.norm(seg)
