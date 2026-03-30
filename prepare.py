@@ -1,21 +1,26 @@
 """
-prepare.py — FROZEN evaluation harness for autoresearch-drone.
+prepare.py — Evaluation harness for autoresearch-drone.
 
-DO NOT MODIFY THIS FILE. The agent modifies pilot.py and score.py only.
+INFRASTRUCTURE FILE — maintained by the human, not the agent.
+The agent modifies pilot.py and score.py only.
 
 This file:
-1. Defines the gate course (positions, normals, dimensions)
-2. Connects to PX4 SITL via MAVSDK
-3. Arms, takes off, enters offboard mode
-4. Calls pilot.run(drone, gates) — the agent's code
-5. Monitors gate passage and enforces timeout
-6. Logs raw metrics and computes score
-7. Prints summary in a grep-friendly format
+1. Manages PX4 SITL lifecycle (launch, connect, teardown)
+2. Defines the gate course (positions, normals, dimensions)
+3. Connects to PX4 SITL via MAVSDK
+4. Arms, takes off, enters offboard mode
+5. Calls pilot.run(drone, gates) — the agent's code
+6. Monitors gate passage and enforces timeout
+7. Logs raw metrics, computes score, saves trajectory
+8. Prints summary in a grep-friendly format
 """
 
 import asyncio
 import time
 import sys
+import os
+import subprocess
+import signal
 import importlib
 import numpy as np
 from mavsdk import System
@@ -29,12 +34,16 @@ from mavsdk.action import ActionError
 MAX_RUN_DURATION = 480.0        # 8 minutes, matching competition spec
 TAKEOFF_ALTITUDE = 2.0          # meters above ground
 GATE_PASS_RADIUS = 1.5          # meters — how close to gate center counts as passage
-GATE_PASS_DOT_THRESHOLD = 0.3   # cos(angle) threshold for direction check
 TELEMETRY_RATE_HZ = 50          # how often we poll position for gate detection
-CONNECTION_TIMEOUT = 30.0       # seconds to wait for MAVSDK connection
-TAKEOFF_TIMEOUT = 15.0          # seconds to wait for takeoff completion
+CONNECTION_TIMEOUT = 45.0       # seconds to wait for MAVSDK connection
 
-MAVSDK_ADDRESS = "udp://:14540"
+MAVSDK_ADDRESS = "udpin://0.0.0.0:14540"
+
+PX4_AUTOPILOT_DIR = os.path.expanduser("~/PX4-Autopilot")
+SIM_STARTUP_TIMEOUT = 60.0      # seconds to wait for PX4 SITL to become ready
+
+# Trajectory logging — every run is saved for visualization
+TRAJECTORY_DIR = "trajectories"
 
 # ============================================================================
 # GATE COURSE DEFINITION
@@ -132,8 +141,7 @@ class GateTracker:
 
         Gate passage is detected when:
         1. The drone crosses the gate's plane (dot product with normal changes sign)
-        2. The drone is within the gate's radius at the crossing point
-        3. The drone is moving roughly in the gate's forward direction
+        2. The drone is within GATE_PASS_RADIUS of the gate center at the crossing point
         """
         if self.next_gate_idx >= len(self.gates):
             return False
@@ -182,6 +190,100 @@ class GateTracker:
 
 
 # ============================================================================
+# TRAJECTORY LOGGING
+# ============================================================================
+
+
+def save_trajectory(results, trajectory):
+    """Save trajectory and run metadata for visualization."""
+    os.makedirs(TRAJECTORY_DIR, exist_ok=True)
+
+    # Count existing files to get run number
+    existing = [f for f in os.listdir(TRAJECTORY_DIR) if f.endswith(".npz")]
+    run_num = len(existing) + 1
+
+    traj_array = np.array(trajectory) if trajectory else np.zeros((0, 4))
+    gate_positions = np.array([g["position"] for g in GATES])
+    gate_normals = np.array([g["normal"] for g in GATES])
+
+    filename = os.path.join(TRAJECTORY_DIR, f"run_{run_num:04d}.npz")
+    np.savez_compressed(
+        filename,
+        trajectory=traj_array,          # (N, 4): time, x, y, z
+        gate_positions=gate_positions,   # (M, 3): x, y, z per gate
+        gate_normals=gate_normals,       # (M, 3): nx, ny, nz per gate
+        score=results["score"],
+        lap_time=results["lap_time"],
+        gates_passed=results["gates_passed"],
+        total_gates=results["total_gates"],
+        crashed=results["crashed"],
+    )
+    print(f"Trajectory saved: {filename}")
+
+
+# ============================================================================
+# PX4 SITL LIFECYCLE MANAGEMENT
+# ============================================================================
+
+_sim_process = None
+
+
+def kill_sim():
+    """Kill any existing PX4 and Gazebo processes."""
+    global _sim_process
+    if _sim_process is not None:
+        try:
+            os.killpg(os.getpgid(_sim_process.pid), signal.SIGKILL)
+        except Exception:
+            pass
+        _sim_process = None
+    # Also kill any strays
+    for pattern in ["px4", "gz", "ruby"]:
+        subprocess.run(
+            ["pkill", "-9", "-f", pattern],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    time.sleep(5)
+
+
+def launch_sim():
+    """Launch PX4 SITL headless and return the subprocess."""
+    global _sim_process
+    print("Launching PX4 SITL (headless)...")
+    env = os.environ.copy()
+    env["HEADLESS"] = "1"
+    _sim_process = subprocess.Popen(
+        ["make", "px4_sitl", "gz_x500"],
+        cwd=PX4_AUTOPILOT_DIR,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        preexec_fn=os.setsid,
+    )
+    return _sim_process
+
+
+async def wait_for_sim_ready():
+    """Wait for PX4 SITL to start up. The actual MAVSDK connection is handled by run_experiment."""
+    print("Waiting for sim to initialize...")
+    # PX4 SITL typically takes 15-25s to be ready. We give it a generous window.
+    # The MAVSDK connection_state loop in run_experiment() handles the final handshake.
+    await asyncio.sleep(20)
+    if _sim_process is not None and _sim_process.poll() is not None:
+        print(f"ERROR: Sim process exited with code {_sim_process.returncode}")
+        return False
+    print("Sim startup wait complete.")
+    return True
+
+
+def restart_sim():
+    """Kill existing sim, launch fresh, return when ready."""
+    kill_sim()
+    launch_sim()
+
+
+# ============================================================================
 # MAIN RUN HARNESS
 # ============================================================================
 
@@ -205,6 +307,24 @@ async def run_experiment():
         importlib.reload(sys.modules["score"])
     import score
 
+    # Restart PX4 SITL for a clean state
+    for attempt in range(3):
+        restart_sim()
+        if await wait_for_sim_ready():
+            break
+        print(f"Sim startup attempt {attempt + 1}/3 failed, retrying...")
+    else:
+        kill_sim()
+        return make_error_result("sim_startup_timeout")
+
+    try:
+        return await _fly_experiment(pilot, score)
+    finally:
+        kill_sim()
+
+
+async def _fly_experiment(pilot, score):
+    """Inner experiment logic — always wrapped by kill_sim() in the caller."""
     drone = System()
     print(f"Connecting to {MAVSDK_ADDRESS}...")
     await drone.connect(system_address=MAVSDK_ADDRESS)
@@ -225,10 +345,18 @@ async def run_experiment():
     print("Connected. Waiting for GPS fix / position estimate...")
 
     # Wait for position estimate (PX4 needs this before arming)
+    health_deadline = time.time() + CONNECTION_TIMEOUT
+    position_ok = False
     async for health in drone.telemetry.health():
         if health.is_local_position_ok:
+            position_ok = True
             print("Position estimate OK.")
             break
+        if time.time() > health_deadline:
+            break
+    if not position_ok:
+        print("ERROR: Position estimate timeout")
+        return make_error_result("position_timeout")
 
     # Arm
     print("Arming...")
@@ -265,6 +393,7 @@ async def run_experiment():
 
     # Set up gate tracking
     tracker = GateTracker(GATES)
+    trajectory = []  # list of (timestamp, x, y, z) for visualization
     start_time = time.time()
     crashed = False
     timeout = False
@@ -298,6 +427,7 @@ async def run_experiment():
                         odom.position_body.y_m,
                         odom.position_body.z_m,
                     ])
+                    trajectory.append((elapsed, pos[0], pos[1], pos[2]))
                     passed = tracker.update(pos)
                     if passed:
                         g = tracker.passed[-1]
@@ -384,6 +514,10 @@ async def run_experiment():
         final_score = 9999.0
 
     results["score"] = final_score
+
+    # Save trajectory for visualization
+    save_trajectory(results, trajectory)
+
     return results
 
 
