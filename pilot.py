@@ -18,9 +18,9 @@ from mavsdk.offboard import PositionNedYaw
 # CONFIGURATION
 # ============================================================================
 
-APPROACH_DIST = 2.0     # meters before gate along -normal
-THROUGH_DIST = 1.0      # meters past gate along +normal
-GATE_REACHED_DIST = 1.3 # switch to next waypoint when this close
+APPROACH_DIST = 3.0     # meters before gate along -normal
+THROUGH_DIST = 2.0      # meters past gate along +normal
+GATE_REACHED_DIST = 2.3 # switch to next waypoint when this close
 COMMAND_RATE_HZ = 30
 
 
