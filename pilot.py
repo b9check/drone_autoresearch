@@ -57,7 +57,7 @@ async def run(drone, gates):
         # Approach->through (gate passage): gentle blend (0.3) to preserve alignment
         is_through_wp = (idx % 2 == 1)
         cmd_target = target
-        max_blend = 0.8 if is_through_wp else 0.3
+        max_blend = 0.8 if is_through_wp else 0.5
 
         if idx + 1 < len(waypoints) and distance < LOOKAHEAD_DIST:
             remaining = LOOKAHEAD_DIST - distance
