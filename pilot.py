@@ -22,7 +22,7 @@ from mavsdk.offboard import PositionNedYaw
 APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
-LOOKAHEAD_DIST = 6.0    # meters ahead on path for blending
+LOOKAHEAD_DIST = 8.0    # meters ahead on path for blending
 COMMAND_RATE_HZ = 50
 
 
