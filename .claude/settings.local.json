@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(wsl:*)"
+      "Bash(wsl:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }
