@@ -2,3 +2,7 @@ commit	score	lap_time	gates	status	description
 f70766a	385.614	0.0	7/8	keep	baseline — simple waypoint following, missed gate 8
 1a59fc8	386.180	0.0	7/8	discard	through-offset 3m past gate along normal, still missed gate 8
 9b2f2bf	513.058	0.0	2/8	discard	velocity-based control (VelocityNedYaw), severe oscillation
+6e2a8ce	21.177	21.2	8/8	keep	approach+through waypoints (3m/2m along normals), all gates passed
+76f4cec	385.654	0.0	7/8	discard	approach+through gate 8 only, centers for 1-7 — still missed gate 8
+c446ee1	385.975	0.0	7/8	discard	reduced distances (2m/1m) + smaller switch radius (1.3m) — slower AND missed gate 8
+2c38a3a	385.830	0.0	7/8	discard	switch radius 2.3m — missed gate 8, approach→through too short for early switch

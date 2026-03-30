@@ -38,6 +38,15 @@ Follow the loop in program.md exactly. Key reminders:
 - Each experiment takes ~1 min (25s sim startup + 30s flight + teardown)
 - The experiment loop runs INDEFINITELY until interrupted by the human
 
+## Time Discipline
+
+**Getting stuck is unacceptable.** The experiment loop must keep moving.
+
+- **Thinking between experiments: MAX 60 seconds.** Form your hypothesis, edit the code, commit, and run. Do not over-analyze or second-guess. Quick iterations beat careful planning.
+- **Sim run timeout: 3 minutes.** If `prepare.py` hasn't returned output in 3 minutes, something is wrong. Kill it and retry.
+- **Analysis after a run: MAX 30 seconds.** Read the results, log them, decide keep/discard, move on.
+- **If stuck on a problem for 3+ failed experiments:** Step back, try a completely different approach, or simplify. Do not keep tweaking the same parameter.
+
 ## Discarding Failed Experiments
 
 Use `git reset --hard HEAD~1` to discard the latest experiment, as program.md instructs. Only ever reset ONE commit back. Never reset to an arbitrary old commit hash — that risks reverting infrastructure files.
