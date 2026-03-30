@@ -1,12 +1,13 @@
 """
-pilot.py — Lookahead waypoint follower with gate-alignment protection.
+pilot.py — Multi-waypoint path lookahead with gate alignment protection.
 
 For each gate, two waypoints align the drone with the gate normal:
 1. Approach point: 3m before gate along -normal (align heading)
 2. Through point: 2m past gate along +normal (ensure passage)
 
-Lookahead blending only on through->approach segments (between gates),
-never on approach->through (critical alignment).
+The drone follows the polyline path with a lookahead target. The lookahead
+walks along the path but STOPS at approach waypoints (even indices) to
+preserve gate alignment.
 """
 
 import asyncio
@@ -22,54 +23,38 @@ from mavsdk.offboard import PositionNedYaw
 APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
-LOOKAHEAD_DIST = 12.0   # meters ahead on path for blending
+LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
 
 
 async def run(drone, gates):
-    """Fly through all gates using lookahead waypoint following."""
+    """Fly through all gates using multi-waypoint path lookahead."""
     # Build waypoint sequence: approach + through per gate
-    # Even indices = approach, odd indices = through
     waypoints = []
     for gate in gates:
         n = gate["normal"]
         c = gate["position"]
-        waypoints.append(c - APPROACH_DIST * n)  # approach (even idx)
-        waypoints.append(c + THROUGH_DIST * n)   # through (odd idx)
+        waypoints.append(c - APPROACH_DIST * n)  # even = approach
+        waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
     idx = 0
     while idx < len(waypoints):
-        target = waypoints[idx]
         position = await get_position(drone)
         if position is None:
             await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
             continue
 
-        delta = target - position
-        distance = np.linalg.norm(delta)
-
-        if distance < GATE_REACHED_DIST:
+        dist_to_wp = np.linalg.norm(waypoints[idx] - position)
+        if dist_to_wp < GATE_REACHED_DIST:
             idx += 1
             continue
 
-        # Lookahead blending toward next waypoint
-        # Through->approach (between gates): aggressive blend (0.8)
-        # Approach->through (gate passage): gentle blend (0.3) to preserve alignment
-        is_through_wp = (idx % 2 == 1)
-        cmd_target = target
-        max_blend = 0.8 if is_through_wp else 0.5
+        # Walk along path from current waypoint, but stop at approach points
+        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD)
 
-        if idx + 1 < len(waypoints) and distance < LOOKAHEAD_DIST:
-            remaining = LOOKAHEAD_DIST - distance
-            next_wp = waypoints[idx + 1]
-            to_next = next_wp - target
-            seg_len = np.linalg.norm(to_next)
-            if seg_len > 0:
-                blend = min(remaining / seg_len, max_blend)
-                cmd_target = target + blend * to_next
+        delta = cmd_target - position
+        yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-        cmd_delta = cmd_target - position
-        yaw_deg = math.degrees(math.atan2(cmd_delta[1], cmd_delta[0]))
         await drone.offboard.set_position_ned(
             PositionNedYaw(
                 north_m=cmd_target[0],
@@ -80,6 +65,37 @@ async def run(drone, gates):
         )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
+
+
+def walk_along_path(waypoints, idx, position, lookahead):
+    """Walk lookahead meters along polyline. Stop at approach waypoints to preserve alignment."""
+    current = waypoints[idx]
+    dist_to_wp = np.linalg.norm(current - position)
+
+    if dist_to_wp >= lookahead:
+        return current
+
+    remaining = lookahead - dist_to_wp
+    prev = current
+    j = idx + 1
+
+    while j < len(waypoints) and remaining > 0:
+        # Stop at approach waypoints (even indices) — they're alignment-critical
+        if j % 2 == 0 and j > idx + 1:
+            return waypoints[j]
+
+        seg = waypoints[j] - prev
+        seg_len = np.linalg.norm(seg)
+        if seg_len <= 0:
+            j += 1
+            continue
+        if remaining <= seg_len:
+            return prev + (remaining / seg_len) * seg
+        remaining -= seg_len
+        prev = waypoints[j]
+        j += 1
+
+    return waypoints[-1]
 
 
 async def get_position(drone) -> np.ndarray:
