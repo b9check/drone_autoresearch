@@ -131,6 +131,25 @@ Some considerations:
 
 Each experiment is one complete run of the drone through the course.
 
+### Handling Sim Variance
+
+The sim is nominally deterministic, but in practice there is ~0.5s run-to-run variance from timing jitter and async scheduling. This matters for keep/discard decisions:
+
+- **For improvements > 1.0s**: A single run is sufficient. The signal is well above the noise.
+- **For improvements of 0.2–1.0s**: Run twice and take the better of two. This filters lucky outliers.
+- **For improvements < 0.2s**: Be skeptical. If you need three runs to tell whether an experiment helped, the improvement is marginal and probably not worth the added complexity. Consider whether the change simplifies the code instead.
+- **Never keep a change based on a single lucky run** that's substantially better than expected. If you go from 10.5s to 9.5s on one run, verify it with a second run before committing.
+
+### Structural vs. Parameter Experiments
+
+Recognize which type of experiment you're running and use the appropriate method:
+
+**Structural changes** (new algorithm, new waypoint strategy, different control mode): Use the standard one-change-per-experiment loop. Change one thing, test it, keep or discard.
+
+**Parameter tuning** (lookahead distance, speed threshold, approach offset): Don't burn one experiment per value. Write a parameter sweep within a single experiment — run the course N times with different values, pick the best, and commit with that value. A sweep of 5 values in one experiment is faster and more informative than 5 sequential experiments.
+
+**Single-variable discipline**: Never combine two unrelated changes in one experiment. If you change approach distance AND speed limit simultaneously, you can't tell which one caused the result. The exception is when two changes are mechanically coupled (e.g., reducing approach distance requires reducing switch radius proportionally).
+
 LOOP FOREVER:
 
 1. **Examine state**: Look at the current code in `pilot.py` and `score.py`, the git log, `results.tsv`, and `notebook.md` to understand where you are.
@@ -153,28 +172,29 @@ LOOP FOREVER:
 
 ### results.tsv format
 
-Tab-separated, 6 columns:
+Tab-separated, 7 columns:
 
 ```
-commit	score	lap_time	gates	status	description
+commit	score	lap_time	gates	min_margin	status	description
 ```
 
 - `commit`: short git hash (7 chars)
 - `score`: composite score from score.py (lower is better). Use 9999.0 for crashes.
 - `lap_time`: raw lap time in seconds. Use 0.0 for DNF/crash.
 - `gates`: gates passed / total gates (e.g. "7/10")
+- `min_margin`: closest gate passage distance from center (meters). This is your reliability signal — if min_margin is approaching GATE_PASS_RADIUS (1.5m), you're one bad run from a missed gate. Use 0.0 for crashes.
 - `status`: `keep`, `discard`, or `crash`
 - `description`: short text describing what was tried
 
 Example:
 ```
-commit	score	lap_time	gates	status	description
-a1b2c3d	9999.000	0.0	0/10	keep	baseline — hover only
-b2c3d4e	850.000	0.0	3/10	keep	basic waypoint following to first 3 gates
-c3d4e5f	420.000	95.3	10/10	keep	complete course, conservative speed
-d4e5f6g	415.000	88.7	10/10	keep	increased approach speed
-e5f6g7h	9999.000	0.0	6/10	discard	aggressive cornering — crashed at gate 7
-f6g7h8i	390.000	82.1	10/10	keep	moderate cornering with speed reduction before tight turns
+commit	score	lap_time	gates	min_margin	status	description
+a1b2c3d	9999.000	0.0	0/10	0.0	keep	baseline — hover only
+b2c3d4e	850.000	0.0	3/10	0.45	keep	basic waypoint following to first 3 gates
+c3d4e5f	420.000	95.3	10/10	0.31	keep	complete course, conservative speed
+d4e5f6g	415.000	88.7	10/10	0.52	keep	increased approach speed
+e5f6g7h	9999.000	0.0	6/10	1.29	discard	aggressive cornering — crashed at gate 7
+f6g7h8i	390.000	82.1	10/10	0.38	keep	moderate cornering with speed reduction before tight turns
 ```
 
 ## Phase Curriculum
@@ -185,15 +205,25 @@ You have broad freedom to restructure and rewrite the code however you want. How
 
 **Goal**: Achieve a complete lap (all gates passed, no crash) with the simplest possible perception. Use odometry data for state estimation. If gate positions are available or can be hardcoded from initial exploration, do that. Focus entirely on: how to plan a path through gates, how to generate smooth and fast setpoints, and how to command the drone.
 
-**Advance when**: You can reliably complete the course (>90% completion rate across 3 consecutive runs) with a reasonable lap time.
+**Advance when**: You can reliably complete the course (>90% completion rate across 3 consecutive runs) AND lap times have stopped improving with parameter tuning in position mode (typically 2–3 consecutive experiments with <0.3s improvement).
 
 **What to experiment with**:
-- Waypoint following vs. trajectory optimization
-- Speed profiles: constant speed vs. acceleration/deceleration around gates
+- Waypoint following → approach/through gate alignment → multi-waypoint lookahead (see `drone_racing.md` trajectory levels)
 - Gate approach geometry: straight-on vs. cutting corners
-- SET_ATTITUDE_TARGET vs. SET_POSITION_TARGET_LOCAL_NED (which control mode works better?)
-- Setpoint lookahead distance
-- Cornering strategy: slow down and turn vs. bank and maintain speed
+- Lookahead distance and its interaction with gate alignment (see `drone_racing.md` Section 3)
+- Per-gate parameter tuning (some gates need tighter alignment than others)
+
+### Phase A+ — Breaking the Position Controller Ceiling
+
+**Goal**: Add explicit speed management. Phase A uses `PositionNedYaw` which lets PX4 decide how fast to fly. This phase takes control of speed while keeping the path planning from Phase A.
+
+**Advance when**: Lap times improve measurably over pure position mode, with maintained reliability.
+
+**What to experiment with** (see `drone_racing.md` Section 7 for details):
+- Dynamic lookahead: vary lookahead distance based on upcoming curvature (far on straights = faster, short before corners = slower)
+- `set_position_velocity_ned`: position for alignment + velocity feedforward for speed
+- Curvature-based speed profiling with the forward-backward algorithm
+- Hybrid control: velocity/attitude on straights, position near gates
 
 ### Phase B — Perception Integration
 
@@ -210,13 +240,13 @@ You have broad freedom to restructure and rewrite the code however you want. How
 
 ### Phase C — Full Optimization
 
-**Goal**: Minimize lap time. Everything is fair game. You have a working, reliable system from Phases A and B. Now push it to the limit.
+**Goal**: Minimize lap time. Everything is fair game. You have a working, reliable system from previous phases. Now push it to the limit.
 
 **What to experiment with**:
+- **Attitude control** (`SET_ATTITUDE_TARGET`): Direct roll/pitch/thrust commands bypass PX4's conservative position controller entirely. Highest performance ceiling but requires you to manage altitude, speed, and trajectory simultaneously. Start by measuring hover thrust (see `mavlink_interface.md`), then implement a simple attitude controller for straights, then extend to corners.
 - Aggressive trajectory optimization (cutting gates closer, faster approach speeds)
 - Predictive path planning (plan multiple gates ahead, not just the next one)
-- Dynamic speed adaptation based on upcoming track geometry
-- End-to-end approaches (if they can beat your modular pipeline)
+- Offline trajectory optimization (compute the time-optimal path once before the run, track it during the race)
 - Aerodynamic exploitation (using momentum, gravity-assisted dives, banking efficiency)
 - Any radical restructuring of the architecture, as long as it improves the score
 
@@ -281,7 +311,10 @@ When an experiment fails (crash or worse score), don't just discard and move on.
 - **Thinking between experiments: MAX 60 seconds.** Form your hypothesis, edit the code, commit, and run. Do not over-analyze or second-guess. Quick iterations beat careful planning.
 - **Sim run timeout: 2 minutes.** If `prepare.py` hasn't returned output in 2 minutes, something is wrong. Kill it and retry. (The harness auto-aborts stuck runs in 30s, so this is a last resort.)
 - **Analysis after a run: MAX 30 seconds.** Read the results, log them, decide keep/discard, move on.
-- **If stuck on a problem for 3+ failed experiments:** Step back, try a completely different approach, or simplify. Do not keep tweaking the same parameter.
+- **If stuck on a problem for 3+ failed experiments:** Step back and diagnose. The question isn't "what parameter to try next" — it's "am I hitting a fundamental ceiling?"
+  - **Position controller ceiling**: If you're in position mode and lap times have plateaued despite trying different lookahead values, path shapes, and approach geometries, you've likely hit PX4's internal speed limits (~12 m/s horizontal, conservative bank angles). The fix is not more parameter tuning — it's switching to velocity control or attitude control. See `drone_racing.md` Section 7.
+  - **Gate alignment ceiling**: If gate 8 (or the hardest gate) keeps failing at similar margins regardless of approach strategy, the issue is geometric — the approach/through waypoint pattern can only do so much. Consider corner-cutting offsets or per-gate parameter tuning.
+  - **Architecture ceiling**: If every incremental tweak gives < 0.3s improvement, the current code structure may be maxed out. Consider a wholesale restructure rather than continued tuning.
 
 ## NEVER STOP
 
