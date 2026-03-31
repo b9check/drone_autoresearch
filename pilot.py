@@ -20,7 +20,7 @@ from mavsdk.offboard import PositionNedYaw
 # CONFIGURATION
 # ============================================================================
 
-APPROACH_DIST = 3.0     # meters before gate along -normal
+APPROACH_DIST = 2.5     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
 LOOKAHEAD = 10.0        # meters ahead on polyline path
