@@ -23,7 +23,7 @@ from mavsdk.offboard import PositionNedYaw
 APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
-LOOKAHEAD = 11.0        # meters ahead on polyline path
+LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
 
 
@@ -34,11 +34,10 @@ async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
     # Build waypoint sequence: approach + through per gate
     waypoints = []
-    for i, gate in enumerate(gates):
+    for gate in gates:
         n = gate["normal"]
         c = gate["position"]
-        a_dist = 4.0 if i == len(gates) - 1 else APPROACH_DIST
-        waypoints.append(c - a_dist * n)  # even = approach
+        waypoints.append(c - APPROACH_DIST * n)  # even = approach
         waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
     # Precompute which gates have easy turns (don't need hard stop)
