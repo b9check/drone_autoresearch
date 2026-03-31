@@ -1,15 +1,19 @@
 """
-pilot.py — Multi-waypoint path lookahead with split position/velocity control.
+pilot.py — Multi-waypoint path lookahead with gate alignment protection.
 
-Position target: 10m lookahead with hard stops at alignment-critical gates.
-Velocity feedforward: 15m lookahead without stops, giving PX4 the overall
-path direction to prevent unnecessary deceleration.
+For each gate, two waypoints align the drone with the gate normal:
+1. Approach point: 3m before gate along -normal (align heading)
+2. Through point: 2m past gate along +normal (ensure passage)
+
+The drone follows the polyline path with a lookahead target. The lookahead
+walks along the path but STOPS at approach waypoints (even indices) to
+preserve gate alignment.
 """
 
 import asyncio
 import math
 import numpy as np
-from mavsdk.offboard import PositionNedYaw, VelocityNedYaw
+from mavsdk.offboard import PositionNedYaw
 
 
 # ============================================================================
@@ -19,16 +23,15 @@ from mavsdk.offboard import PositionNedYaw, VelocityNedYaw
 APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
-POS_LOOKAHEAD = 10.0    # meters ahead for position target (with hard stops)
-VEL_LOOKAHEAD = 15.0    # meters ahead for velocity direction (no stops)
-VEL_FF_SPEED = 8.0      # m/s velocity feedforward magnitude
+LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
+
 
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
 
 
 async def run(drone, gates):
-    """Fly through all gates using split position/velocity control."""
+    """Fly through all gates using multi-waypoint path lookahead."""
     # Build waypoint sequence: approach + through per gate
     waypoints = []
     for gate in gates:
@@ -57,43 +60,20 @@ async def run(drone, gates):
             idx += 1
             continue
 
-        # Position target: 10m with hard stops for alignment
-        pos_target = walk_along_path(waypoints, idx, position, POS_LOOKAHEAD,
+        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
                                      hard_stop_gates)
-        # Velocity direction: 15m without stops for speed
-        vel_target = walk_along_path(waypoints, idx, position, VEL_LOOKAHEAD,
-                                     set())
 
-        delta = pos_target - position
+        delta = cmd_target - position
         yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-        vel_dir = vel_target - position
-        vel_dist = np.linalg.norm(vel_dir)
-        if vel_dist > 1.0:
-            vel_dir = vel_dir / vel_dist
-            await drone.offboard.set_position_velocity_ned(
-                PositionNedYaw(
-                    north_m=pos_target[0],
-                    east_m=pos_target[1],
-                    down_m=pos_target[2],
-                    yaw_deg=yaw_deg,
-                ),
-                VelocityNedYaw(
-                    north_m_s=vel_dir[0] * VEL_FF_SPEED,
-                    east_m_s=vel_dir[1] * VEL_FF_SPEED,
-                    down_m_s=vel_dir[2] * VEL_FF_SPEED,
-                    yaw_deg=0.0,
-                ),
+        await drone.offboard.set_position_ned(
+            PositionNedYaw(
+                north_m=cmd_target[0],
+                east_m=cmd_target[1],
+                down_m=cmd_target[2],
+                yaw_deg=yaw_deg,
             )
-        else:
-            await drone.offboard.set_position_ned(
-                PositionNedYaw(
-                    north_m=pos_target[0],
-                    east_m=pos_target[1],
-                    down_m=pos_target[2],
-                    yaw_deg=yaw_deg,
-                )
-            )
+        )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
 
