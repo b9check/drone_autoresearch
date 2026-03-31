@@ -92,4 +92,8 @@ Empirical discoveries about the simulator, drone, track, and control problem. Th
 - **5m gate 8 approach**: same margin as 4m but slower. 4m is optimal.
 - **Sim variance**: ±0.8s (10.0 to 10.8 for the same config). Need 0.5s+ improvement to be detectable.
 - **Session 3 end state**: commit 69988f1. Best config: 10m lookahead, gate 3 relaxed, gate 8 4m approach, selective hard stops {0, 4, 5, 7}. Best: 10.0s.
-- **Next session**: try time-based target progression (target advances along path at fixed speed) or a completely different path planning approach (Dubins paths, pre-computed optimal path).
+- **Easy gate tiny offsets (0.5m approach/through)**: saves ~4.5m total path length. Previous claim that "approach changes don't change path" was WRONG for large reductions — small reductions are compensated by inter-gate growth, but reducing from 3m/2m to 0.5m/0.5m saves 1.5m per easy gate. Direct line between through points naturally passes through easy gate centers (gate 1: 0.064m from center). 9.8s best, 10.5-10.6 typical.
+- **Time-based target progression**: broken hard-stop release logic. Gave excellent gate margins (0.09-0.54m!) but 15.7s — much slower. Abandoned.
+- **New best: 9.8s**, commit 8a85b85. Config: 10m lookahead, gate 3 relaxed, gate 8 4m approach, easy gates 0.5m offsets, hard stops {0, 4, 5, 7}.
+- **Best score progression**: ... → 10.27s → 10.1s → 10.0s → 9.8s.
+- **Session 3 end state**: commit 8a85b85. Next: try even smaller offsets for easy gates (0.25m or 0m), or optimize gate 3's offset since it's relaxed.
