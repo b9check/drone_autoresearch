@@ -13,7 +13,7 @@ preserve gate alignment.
 import asyncio
 import math
 import numpy as np
-from mavsdk.offboard import PositionNedYaw
+from mavsdk.offboard import Attitude, PositionNedYaw
 
 
 # ============================================================================
@@ -26,8 +26,13 @@ GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
 LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
 
-
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
+
+# Phase C: attitude control with altitude hold
+ATT_PITCH = -20.0       # degrees, forward pitch
+ATT_HOVER = 0.37        # estimated hover thrust (PX4 x500)
+ATT_KP_ALT = 0.3        # altitude correction gain
+ATT_SWITCH_DIST = 5.0   # switch to position mode this close to next waypoint
 
 
 async def run(drone, gates):
@@ -62,20 +67,40 @@ async def run(drone, gates):
             idx += 1
             continue
 
-        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
-                                     hard_stop_gates)
+        # Check if we should use attitude mode (easy inter-gate through segments)
+        is_through = (idx % 2 == 1)
+        next_gate_idx = (idx + 1) // 2
+        next_is_easy = (next_gate_idx < len(gates)
+                        and next_gate_idx not in hard_stop_gates)
+        next_wp = waypoints[idx + 1] if idx + 1 < len(waypoints) else None
 
-        delta = cmd_target - position
-        yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
+        if (is_through and next_is_easy and next_wp is not None
+                and np.linalg.norm(next_wp - position) > ATT_SWITCH_DIST):
+            # Attitude mode with closed-loop altitude hold
+            delta = next_wp - position
+            yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-        await drone.offboard.set_position_ned(
-            PositionNedYaw(
-                north_m=cmd_target[0],
-                east_m=cmd_target[1],
-                down_m=cmd_target[2],
-                yaw_deg=yaw_deg,
+            # Altitude correction: maintain target altitude
+            alt_error = next_wp[2] - position[2]  # negative = too high
+            pitch_cos = math.cos(math.radians(ATT_PITCH))
+            thrust = (ATT_HOVER + ATT_KP_ALT * alt_error) / pitch_cos
+            thrust = max(0.1, min(0.8, thrust))
+
+            await drone.offboard.set_attitude(Attitude(
+                roll_deg=0.0, pitch_deg=ATT_PITCH,
+                yaw_deg=yaw_deg, thrust_value=thrust,
+            ))
+        else:
+            # Position mode: standard lookahead
+            cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
+                                         hard_stop_gates)
+            delta = cmd_target - position
+            yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
+
+            await drone.offboard.set_position_ned(
+                PositionNedYaw(cmd_target[0], cmd_target[1], cmd_target[2],
+                               yaw_deg)
             )
-        )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
 
