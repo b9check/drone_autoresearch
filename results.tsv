@@ -1,0 +1,50 @@
+commit	score	lap_time	gates	status	description
+f70766a	385.614	0.0	7/8	keep	baseline — simple waypoint following, missed gate 8
+1a59fc8	386.180	0.0	7/8	discard	through-offset 3m past gate along normal, still missed gate 8
+9b2f2bf	513.058	0.0	2/8	discard	velocity-based control (VelocityNedYaw), severe oscillation
+6e2a8ce	21.177	21.2	8/8	keep	approach+through waypoints (3m/2m along normals), all gates passed
+76f4cec	385.654	0.0	7/8	discard	approach+through gate 8 only, centers for 1-7 — still missed gate 8
+c446ee1	385.975	0.0	7/8	discard	reduced distances (2m/1m) + smaller switch radius (1.3m) — slower AND missed gate 8
+2c38a3a	385.830	0.0	7/8	discard	switch radius 2.3m — missed gate 8, approach→through too short for early switch
+dc7f8cc	10.529	10.5	8/8	keep	multi-wp lookahead + approach alignment protection
+1d6ff3a	9999.0	0.0	0/8	discard	cubic spline — cuts inside gates
+33f1873	485.870	0.0	3/8	discard	velocity feedforward 12m/s — overshoots corners
+231d04e	9999.0	0.0	0/8	discard	velocity feedforward 3m/s — broke gate detection entirely
+71dec67	386.654	0.0	7/8	discard	soft alignment: bleed 70% lookahead at approach points — missed gate 8
+bd05790	536.339	0.0	1/8	discard	through 1.5m + gate-reached 1.5m — barely passed gate 1, stuck after
+fed9ef0	10.267	10.3	8/8	keep	selective lookahead: skip hard stop at easy turns (<45°)
+8743c4b	9.565	9.6	8/8	keep	lookahead 10→11m with selective stops (gate 8: 1.48m — risky!)
+ec5e461	486.439	0.0	3/8	discard	per-gate approach (4m gate 8, 2m easy) — stuck at gate 4
+deeb206	486.437	0.0	3/8	discard	gate 8 approach 4m only — also 3/8 (11m unreliable, not gate 8)
+8d7832f	486.436	0.0	3/8	discard	confirm: 11m lookahead unreliable (3 runs, all 3/8 at gate 4)
+bc3e61f	9.921	9.9	8/8	discard	10.5m lookahead — inconsistent (9.9/10.4), gate 8 tighter
+d0e2c3c	385.432	0.0	7/8	discard	adaptive lookahead 8-12m — missed gate 8 (too short near turns)
+828aa9f	486.443	0.0	3/8	discard	adaptive lookahead 10-13m — 3/8 (>10m on easy sections breaks gate 4)
+38a6357	10.676	10.7	8/8	discard	approach 2.5m — 8/8 but slower (10.7 vs 10.3), no path savings
+0b15798	485.853	0.0	3/8	discard	split pos/vel (10m pos + 15m vel feedforward) — vel conflicts hard stops
+dc9266b	10.724	10.7	8/8	discard	100Hz command rate — no improvement (rate-limited by odometry)
+8aca78a	385.820	0.0	7/8	discard	Phase A+ aligned vel feedforward (1.2x dist) — missed gate 8, gate 4 slow
+a2e892b	486.423	0.0	3/8	discard	vel feedforward zero at hard stops — made it worse (3/8), vel discontinuity
+0a18d59	10.744	10.7	8/8	discard	set_maximum_speed(20) — no effect on position controller
+009b771	10.244	10.2	8/8	discard	hybrid VelocityNedYaw on easy through segs — gate 8 at 1.48m, 2nd run fails
+40fe287	10.244	10.2	8/8	discard	hybrid vel + 4m gate 8 — gate 8 still 1.46m, unreliable
+6acd562	10.424	10.4	8/8	discard	vel only early course (gates 0-2) — no improvement over position-only
+7fd4bdf	10.776	10.8	8/8	discard	gate 0: 1m approach + no hard stop — total path unchanged
+076b05e	511.404	0.0	2/8	discard	attitude control -25° on easy straights — drone lost after gate 2
+b7151b7	511.406	0.0	2/8	discard	attitude -15° conservative — same failure, drone stuck after gate 2
+63304f3	10.588	10.6	8/8	discard	1m through easy gates — net path same, gate 3 margin worse
+0367fff	10.440	10.4	8/8	discard	10.5m lookahead — no improvement over 10.0m
+2375685	10.971	11.0	8/8	discard	corner-cutting bisector offsets — wrong direction, slower
+fe80b97	10.607	10.6	8/8	discard	corner-cutting AB-line offsets — gate 3 at 1.37m near limit
+38a9f7d	536.343	0.0	1/8	discard	attitude -20° altitude hold — alt sign inverted, drone dropped
+15bd164	387.307	0.0	7/8	discard	attitude alt hold fixed sign — still altitude-unstable, all gates slower
+3695c45	485.612	0.0	3/8	discard	3m/s velocity hint — even tiny vel breaks gate 3→4 (3/8)
+e592ff0	386.662	0.0	7/8	discard	3m through before hard turns — misses gate 8 (code bug then 7/8)
+5cc1f15	10.835	10.8	8/8	discard	5m gate 8 approach — same margin as 4m, slower
+bcaee44	10.008	10.0	8/8	keep	relax gate 3 hard stop (10.0/10.8/10.0 in 3 runs, was 10.8 typical)
+a26dddd	10.916	10.9	8/8	discard	relax gate 5 — worsened (10.9s, gate 8 margin 1.39m)
+03e763d	10.939	10.9	8/8	discard	relax gate 4 — no improvement (10.9s)
+4816ea9	11.211	11.2	8/8	discard	gate 7 through 3m — slower, marginal gate 8 gain
+adf1a2f	486.554	0.0	3/8	discard	attitude + calibrated hover (0.387) — still breaks hard turns
+a29e562	486.554	0.0	3/8	discard	3m/s velocity hint — breaks gate 3→4 transition
+bc35de1	10.146	10.1	8/8	keep	gate 8 approach 4m — margin 1.25→1.23m (was 1.48), verified 2 runs

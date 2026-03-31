@@ -70,3 +70,26 @@ Empirical discoveries about the simulator, drone, track, and control problem. Th
 - **Adaptive lookahead** (speed-based): same failure mode as increased fixed lookahead. Any effective lookahead >10m on easy sections breaks gate 4.
 - **Current best: 10.27s**, commit fed9ef0, 10m lookahead + selective hard stops. Gate 8 at 1.35m from center (0.15m margin).
 - **Best score progression**: 21.2s → 20.3s → 18.5s → 17.1s → 16.6s → 16.4s → 14.1s → 13.3s → 13.2s → 10.5s → 10.27s.
+
+## 2026-03-30 — Session 3: Phase A+ Attempts and Gate 8 Fix
+
+- **Gate 8 approach 4m (was 3m)**: improved gate 8 margin from 1.48m to 1.23-1.25m (0.27m safety margin vs 0.02m). Score 10.1-10.2s. Reliable across 2 runs. The 30° heading mismatch from gate 7 needs more alignment room.
+- **Velocity feedforward (set_position_velocity_ned)**: aligned velocity direction with position target, magnitude proportional to distance. 7/8 gates — gate 8 missed. Velocity causes PX4 to take wider arcs. Zeroing velocity at hard stops makes it WORSE (3/8) — creates discontinuity.
+- **Hybrid VelocityNedYaw on easy through segments**: 12 m/s velocity on easy inter-gate segments. Improved speed slightly (10.2s vs 10.3s) but degraded gate 8 to 1.46-1.48m. Even with 4m gate 8 approach + velocity, gate 8 is inconsistent. Limiting velocity to early-course only (gates 0-2) showed no improvement.
+- **set_maximum_speed(20)**: no effect on PX4 position controller speed.
+- **Gate 0 optimization (1m approach, no hard stop)**: no effect — total path length unchanged because approach distance doesn't change total path when inter-gate direction roughly aligns with gate normal.
+- **Key insight**: reducing approach distance doesn't shorten the total path — it just shifts where the waypoint is on the same-length path. Velocity feedforward in any form is incompatible with this course's tight gate 8 alignment. Phase A position mode is definitively at its ceiling (~10.1s).
+- **Attitude control (set_attitude)**: tested -15° to -25° pitch. Even with closed-loop altitude correction, the drone drops or climbs uncontrollably. Altitude sign was wrong initially (NED z is down). After fixing, all gates are ~1s slower each. Attitude setpoints don't work reliably in this PX4 SITL — possibly the offboard attitude interface isn't fully supported or hover thrust (0.37) is wrong.
+- **Gentle velocity feedforward (3 m/s)**: even 3 m/s constant velocity hint breaks gate 3→4 transition (3/8). set_position_velocity_ned is FUNDAMENTALLY incompatible with this course — ANY velocity feedforward prevents PX4 from decelerating at hard-stop approach waypoints, causing overshoot at gate 4.
+- **Corner-cutting offsets**: shifts gate crossing toward inside of turns. Geometrically correct but directly adds to measured gate-center distance (offsets from ORIGINAL center). 0.5m offset pushed gate 3 to 1.37m (0.13m margin). Not viable unless combined with wider gates.
+- **Position mode ceiling is ~10.1s.** Cannot be broken by: velocity feedforward, VelocityNedYaw hybrid, max speed command, lookahead increase, approach/through tuning, attitude control, or corner cutting. The only path forward is either a WORKING attitude controller (needs correct hover thrust measurement) or a fundamentally different control scheme.
+- **Current best**: 10.1s, commit bc35de1, with 4m gate 8 approach.
+- **Best score progression**: ... → 10.27s → 10.1s (gate 8 fix).
+- **Hover thrust measured**: 0.387 via binary search calibration. Even with correct thrust, attitude control disrupts hard turns (3/8).
+- **Gate 3 relaxation is the key finding**: removing gate 3's hard stop gives 10.0s (2/3 runs), vs 10.8s typical before. Gate 4's hard stop still handles alignment.
+- **Gate 4, 5 relaxation**: no improvement (10.9s each). Only gate 3 benefits from relaxation.
+- **Gate 7 through 3m**: slower (11.2s), marginal gate 8 gain. Not worth it.
+- **5m gate 8 approach**: same margin as 4m but slower. 4m is optimal.
+- **Sim variance**: ±0.8s (10.0 to 10.8 for the same config). Need 0.5s+ improvement to be detectable.
+- **Session 3 end state**: commit 69988f1. Best config: 10m lookahead, gate 3 relaxed, gate 8 4m approach, selective hard stops {0, 4, 5, 7}. Best: 10.0s.
+- **Next session**: try time-based target progression (target advances along path at fixed speed) or a completely different path planning approach (Dubins paths, pre-computed optimal path).
