@@ -29,19 +29,11 @@ COMMAND_RATE_HZ = 50
 
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
 
+CORNER_CUT_MAX = 0.5     # max corner-cutting offset from gate center (m)
+
 
 async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
-    # Build waypoint sequence: approach + through per gate
-    # Gate 8 (idx 7) gets longer approach for alignment (tight 30° heading change)
-    waypoints = []
-    for i, gate in enumerate(gates):
-        n = gate["normal"]
-        c = gate["position"]
-        ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
-        waypoints.append(c - ad * n)             # even = approach
-        waypoints.append(c + THROUGH_DIST * n)   # odd = through
-
     # Precompute which gates have easy turns (don't need hard stop)
     hard_stop_gates = set()
     hard_stop_gates.add(0)  # first gate always needs alignment
@@ -49,6 +41,18 @@ async def run(drone, gates):
         cos_angle = np.dot(gates[i - 1]["normal"], gates[i]["normal"])
         if cos_angle <= EASY_TURN_THRESHOLD:
             hard_stop_gates.add(i)
+
+    # Compute corner-cutting offsets: shift gate crossing toward inside of turn
+    offsets = compute_corner_offsets(gates)
+
+    # Build waypoint sequence: approach + through per gate
+    waypoints = []
+    for i, gate in enumerate(gates):
+        n = gate["normal"]
+        c = gate["position"] + offsets[i]
+        ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
+        waypoints.append(c - ad * n)             # even = approach
+        waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
     idx = 0
     while idx < len(waypoints):
@@ -78,6 +82,42 @@ async def run(drone, gates):
         )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
+
+
+def compute_corner_offsets(gates):
+    """Compute per-gate offsets that cut corners by shifting toward inside of turns."""
+    offsets = []
+    for i, gate in enumerate(gates):
+        if i == 0 or i == len(gates) - 1:
+            offsets.append(np.zeros(3))  # no offset for first/last gate
+            continue
+
+        # Direction from previous gate to this gate, and this gate to next
+        incoming = gates[i]["position"] - gates[i - 1]["position"]
+        outgoing = gates[i + 1]["position"] - gates[i]["position"]
+        incoming = incoming / np.linalg.norm(incoming)
+        outgoing = outgoing / np.linalg.norm(outgoing)
+
+        # Bisector points toward outside of turn; negate for inside
+        bisector = incoming + outgoing
+        bisector_norm = np.linalg.norm(bisector)
+        if bisector_norm < 0.01:
+            offsets.append(np.zeros(3))
+            continue
+
+        # Project onto gate plane (perpendicular to normal)
+        n = gate["normal"]
+        plane_component = bisector - np.dot(bisector, n) * n
+        plane_norm = np.linalg.norm(plane_component)
+        if plane_norm < 0.01:
+            offsets.append(np.zeros(3))
+            continue
+
+        # Offset toward inside of turn (negate bisector), capped
+        offset = -(plane_component / plane_norm) * CORNER_CUT_MAX
+        offsets.append(offset)
+
+    return offsets
 
 
 def walk_along_path(waypoints, idx, position, lookahead, hard_stop_gates):
