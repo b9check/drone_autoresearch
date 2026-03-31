@@ -159,7 +159,7 @@ LOOP FOREVER:
 5. **Run the experiment**: `python3 -u prepare.py > run.log 2>&1` (the `-u` flag disables output buffering so run.log is readable in real-time)
 6. **Read results**: Extract the raw data and score from `run.log`. Use: `grep -a "^score:\|^lap_time:\|^gates_passed:\|^crashed:" run.log` (the `-a` flag handles binary data that MAVSDK sometimes writes to stderr). If the output is empty or malformed, `tail -n 50 run.log` to diagnose.
 7. **Log results**: Append to `results.tsv`.
-8. **Update notebook**: If you learned something generalizable about the sim, the drone, the track, or the control problem, write it in `notebook.md`. See "Lab Notebook" below.
+8. **Update notebook**: After each experiment, write 1-2 lines in `notebook.md` about what you learned. Most experiments teach something — a parameter interaction, a failure mode, a sim behavior, a ceiling. If an experiment genuinely taught nothing new, skip this step, but that should be rare. Short frequent entries are better than long infrequent summaries. See "Lab Notebook" below.
 9. **Keep or discard**:
    - If the score improved (lower): **keep**. The branch advances.
    - If the score is equal or worse: **discard**. Revert only the files you changed:
@@ -256,15 +256,17 @@ You have broad freedom to restructure and rewrite the code however you want. How
 
 ### What to write
 
-Record **empirical facts about the sim and drone** — things that aren't in the references because they're specific to this simulator, this track, this drone model. Examples:
+Record **empirical knowledge** — things that aren't in the references because they're specific to this simulator, this track, this drone model, or this codebase. This includes measurements, but also architectural insights and interaction effects.
 
-- Measured properties: "Gates are ~1.5m wide, orange, rectangular. Gate 4 is a sharp left turn of approximately 90°."
-- Sim behavior: "SET_ATTITUDE_TARGET has ~2 frame latency. SET_POSITION_TARGET_LOCAL_NED has built-in smoothing that limits max acceleration."
-- Drone limits: "Max stable bank angle is approximately 40°. Beyond that, altitude drops rapidly. Thrust-to-weight ratio appears to be ~2:1."
-- Track knowledge: "The course has 10 gates. Gates 1–3 are a gentle left curve. Gates 4–5 require a hard right. Gate 8 is elevated ~2m above gate 7."
-- Odometry quality: "Odometry drift is <0.1m over a full lap. Position estimates are reliable enough for Phase A planning."
-- What works: "Slowing to 3 m/s before turns tighter than 60° eliminates crashes. Lookahead of 3m gives best speed/stability tradeoff."
-- What doesn't: "Pure proportional navigation toward gates causes oscillation at close range. Need a blended approach with position-based guidance inside 5m."
+- **Measured properties**: "Gates are ~1.5m wide, orange, rectangular. Gate 4 is a sharp left turn of approximately 90°."
+- **Sim/controller behavior**: "SET_ATTITUDE_TARGET has ~2 frame latency. SET_POSITION_TARGET_LOCAL_NED has built-in smoothing that limits max acceleration."
+- **Drone limits**: "Max stable bank angle is approximately 40°. Beyond that, altitude drops rapidly. Thrust-to-weight ratio appears to be ~2:1."
+- **Track knowledge**: "The course has 10 gates. Gates 1–3 are a gentle left curve. Gates 4–5 require a hard right. Gate 8 is elevated ~2m above gate 7."
+- **What works and why**: "Approach waypoints along -normal before each gate fixed alignment issues. The key insight is that the approach waypoint forces the controller onto the correct heading before the gate plane."
+- **What doesn't work and why**: "Pure velocity control oscillated because there's no position damping — the drone overshoots and hunts. Position mode provides the damping."
+- **Parameter interactions**: "Reducing approach distance from 3m to 2m also requires reducing switch radius — otherwise the drone switches to the next waypoint before reaching the approach point."
+- **Performance ceilings and bottlenecks**: "Lap times plateaued at ~10.5s despite parameter tuning. The bottleneck is PX4's position controller max velocity, not the path shape."
+- **Session state**: When ending a session, record: the current best commit, any untested code, and what to try first next session.
 
 ### What NOT to write
 
