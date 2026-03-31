@@ -13,7 +13,7 @@ preserve gate alignment.
 import asyncio
 import math
 import numpy as np
-from mavsdk.offboard import Attitude, PositionNedYaw
+from mavsdk.offboard import PositionNedYaw
 
 
 # ============================================================================
@@ -26,27 +26,14 @@ GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
 LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
 
+
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
 
-# Phase C: attitude control with altitude hold
-ATT_PITCH = -20.0       # degrees, forward pitch
-ATT_HOVER = 0.37        # estimated hover thrust (PX4 x500)
-ATT_KP_ALT = 0.3        # altitude correction gain
-ATT_SWITCH_DIST = 5.0   # switch to position mode this close to next waypoint
+CORNER_CUT_MAX = 0.5     # max corner-cutting offset from gate center (m)
 
 
 async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
-    # Build waypoint sequence: approach + through per gate
-    # Gate 8 (idx 7) gets longer approach for alignment (tight 30° heading change)
-    waypoints = []
-    for i, gate in enumerate(gates):
-        n = gate["normal"]
-        c = gate["position"]
-        ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
-        waypoints.append(c - ad * n)             # even = approach
-        waypoints.append(c + THROUGH_DIST * n)   # odd = through
-
     # Precompute which gates have easy turns (don't need hard stop)
     hard_stop_gates = set()
     hard_stop_gates.add(0)  # first gate always needs alignment
@@ -54,6 +41,18 @@ async def run(drone, gates):
         cos_angle = np.dot(gates[i - 1]["normal"], gates[i]["normal"])
         if cos_angle <= EASY_TURN_THRESHOLD:
             hard_stop_gates.add(i)
+
+    # Compute corner-cutting offsets: shift gate crossing toward inside of turn
+    offsets = compute_corner_offsets(gates)
+
+    # Build waypoint sequence: approach + through per gate
+    waypoints = []
+    for i, gate in enumerate(gates):
+        n = gate["normal"]
+        c = gate["position"] + offsets[i]
+        ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
+        waypoints.append(c - ad * n)             # even = approach
+        waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
     idx = 0
     while idx < len(waypoints):
@@ -67,42 +66,57 @@ async def run(drone, gates):
             idx += 1
             continue
 
-        # Check if we should use attitude mode (easy inter-gate through segments)
-        is_through = (idx % 2 == 1)
-        next_gate_idx = (idx + 1) // 2
-        next_is_easy = (next_gate_idx < len(gates)
-                        and next_gate_idx not in hard_stop_gates)
-        next_wp = waypoints[idx + 1] if idx + 1 < len(waypoints) else None
+        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
+                                     hard_stop_gates)
 
-        if (is_through and next_is_easy and next_wp is not None
-                and np.linalg.norm(next_wp - position) > ATT_SWITCH_DIST):
-            # Attitude mode with closed-loop altitude hold
-            delta = next_wp - position
-            yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
+        delta = cmd_target - position
+        yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-            # Altitude correction: NED z is down, so more negative = higher
-            alt_error = position[2] - next_wp[2]  # positive = too low, need more thrust
-            pitch_cos = math.cos(math.radians(ATT_PITCH))
-            thrust = (ATT_HOVER + ATT_KP_ALT * alt_error) / pitch_cos
-            thrust = max(0.1, min(0.8, thrust))
-
-            await drone.offboard.set_attitude(Attitude(
-                roll_deg=0.0, pitch_deg=ATT_PITCH,
-                yaw_deg=yaw_deg, thrust_value=thrust,
-            ))
-        else:
-            # Position mode: standard lookahead
-            cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
-                                         hard_stop_gates)
-            delta = cmd_target - position
-            yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
-
-            await drone.offboard.set_position_ned(
-                PositionNedYaw(cmd_target[0], cmd_target[1], cmd_target[2],
-                               yaw_deg)
+        await drone.offboard.set_position_ned(
+            PositionNedYaw(
+                north_m=cmd_target[0],
+                east_m=cmd_target[1],
+                down_m=cmd_target[2],
+                yaw_deg=yaw_deg,
             )
+        )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
+
+
+def compute_corner_offsets(gates):
+    """Shift gate crossing toward line connecting prev/next gate (shortens path)."""
+    offsets = []
+    for i, gate in enumerate(gates):
+        if i == 0 or i == len(gates) - 1:
+            offsets.append(np.zeros(3))
+            continue
+
+        A = gates[i - 1]["position"]
+        B = gates[i + 1]["position"]
+        C = gate["position"]
+        n = gate["normal"]
+
+        # Perpendicular from gate center to the line A→B
+        AB = B - A
+        AB_len = np.linalg.norm(AB)
+        if AB_len < 0.01:
+            offsets.append(np.zeros(3))
+            continue
+        AB_dir = AB / AB_len
+        AC = C - A
+        perp = AC - np.dot(AC, AB_dir) * AB_dir  # from AB line to gate center
+
+        # Move crossing toward AB line, projected onto gate plane
+        toward_line = -perp
+        toward_line = toward_line - np.dot(toward_line, n) * n  # in-plane only
+        mag = np.linalg.norm(toward_line)
+        if mag < 0.01:
+            offsets.append(np.zeros(3))
+        else:
+            offsets.append(toward_line / mag * min(mag, CORNER_CUT_MAX))
+
+    return offsets
 
 
 def walk_along_path(waypoints, idx, position, lookahead, hard_stop_gates):
