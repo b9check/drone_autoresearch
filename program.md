@@ -18,7 +18,7 @@ notebook.md             # MUTABLE — your lab notebook. Write discoveries here.
 program.md              # READ-ONLY — you are reading this now
 references/             # READ-ONLY — domain knowledge and technical references
   mavlink_interface.md  # MAVLink message specs, MAVSDK usage, control modes
-  drone_racing.md       # Physics, trajectories, and racing strategy
+  drone_racing.md       # Physics, control theory, trajectory optimization, perception, strategy, prior work
 results.tsv             # Experiment log (do not commit)
 run.log                 # Latest run output (do not commit)
 ```
@@ -46,7 +46,7 @@ Read these files for full context before your first experiment:
 - `score.py` — understand the current scoring function.
 - `notebook.md` — read any previous discoveries before planning your next experiment.
 - `references/mavlink_interface.md` — the MAVLink messages available to you, control modes, and timing constraints.
-- `references/drone_racing.md` — physics, trajectory planning, speed profiling, and racing strategy.
+- `references/drone_racing.md` — comprehensive reference: quadrotor physics, control theory (PID/LQR/MPC/feedback linearization), trajectory optimization, speed profiling, perception, optimization methods, machine learning approaches, PX4 internals, and prior work in autonomous racing.
 
 ## The Simulator Interface
 
@@ -182,7 +182,7 @@ commit	score	lap_time	gates	min_margin	status	description
 - `score`: composite score from score.py (lower is better). Use 9999.0 for crashes.
 - `lap_time`: raw lap time in seconds. Use 0.0 for DNF/crash.
 - `gates`: gates passed / total gates (e.g. "7/10")
-- `min_margin`: closest gate passage distance from center (meters). This is your reliability signal — if min_margin is approaching GATE_PASS_RADIUS (1.5m), you're one bad run from a missed gate. Use 0.0 for crashes.
+- `min_margin`: closest gate passage distance from center (meters). This is your reliability signal — if min_margin is approaching GATE_PASS_RADIUS (1.5m), you're one bad run from a missed gate. Extract from the run log: `grep -a "GATE" run.log` shows per-gate distances. Use 0.0 for crashes.
 - `status`: `keep`, `discard`, or `crash`
 - `description`: short text describing what was tried
 
@@ -208,10 +208,10 @@ You have broad freedom to restructure and rewrite the code however you want. How
 **Advance when**: You can reliably complete the course (>90% completion rate across 3 consecutive runs) AND lap times have stopped improving with parameter tuning in position mode (typically 2–3 consecutive experiments with <0.3s improvement).
 
 **What to experiment with**:
-- Waypoint following → approach/through gate alignment → multi-waypoint lookahead (see `drone_racing.md` trajectory levels)
+- Waypoint-based approaches, gate alignment patterns, path-following algorithms (see `drone_racing.md` Sections 3 and 9)
 - Gate approach geometry: straight-on vs. cutting corners
-- Lookahead distance and its interaction with gate alignment (see `drone_racing.md` Section 3)
-- Per-gate parameter tuning (some gates need tighter alignment than others)
+- Lookahead-based path following and its interaction with gate alignment
+- Per-gate parameter tuning (some gates may need tighter alignment than others)
 
 ### Phase A+ — Breaking the Position Controller Ceiling
 
@@ -219,11 +219,11 @@ You have broad freedom to restructure and rewrite the code however you want. How
 
 **Advance when**: Lap times improve measurably over pure position mode, with maintained reliability.
 
-**What to experiment with** (see `drone_racing.md` Section 7 for details):
+**What to experiment with** (see `drone_racing.md` Sections 2, 3.5, and 7 for relevant concepts):
 - Dynamic lookahead: vary lookahead distance based on upcoming curvature (far on straights = faster, short before corners = slower)
-- `set_position_velocity_ned`: position for alignment + velocity feedforward for speed
+- `set_position_velocity_ned`: position for alignment + velocity feedforward for speed (see `mavlink_interface.md`)
 - Curvature-based speed profiling with the forward-backward algorithm
-- Hybrid control: velocity/attitude on straights, position near gates
+- Hybrid control: different control modes for different sections of the course
 
 ### Phase B — Perception Integration
 
@@ -294,7 +294,7 @@ Especially in Phases A and B: a drone that finishes the course in 120 seconds be
 
 ### Use the references
 
-Before trying something novel, check the references. `drone_racing.md` contains principles that took decades of human research to develop. Don't waste experiments rediscovering that you need to decelerate before tight corners. Use the references as a starting point and improve from there.
+Before trying something novel, check the references. `drone_racing.md` covers quadrotor physics, control theory, trajectory optimization, perception, optimization methods, and prior work in autonomous racing. `mavlink_interface.md` covers the available APIs and control modes. These are your toolbox — use them to inform your approach, not as a step-by-step guide.
 
 ### Think before each experiment
 
@@ -312,7 +312,7 @@ When an experiment fails (crash or worse score), don't just discard and move on.
 - **Sim run timeout: 2 minutes.** If `prepare.py` hasn't returned output in 2 minutes, something is wrong. Kill it and retry. (The harness auto-aborts stuck runs in 30s, so this is a last resort.)
 - **Analysis after a run: MAX 30 seconds.** Read the results, log them, decide keep/discard, move on.
 - **If stuck on a problem for 3+ failed experiments:** Step back and diagnose. The question isn't "what parameter to try next" — it's "am I hitting a fundamental ceiling?"
-  - **Position controller ceiling**: If you're in position mode and lap times have plateaued despite trying different lookahead values, path shapes, and approach geometries, you've likely hit PX4's internal speed limits (~12 m/s horizontal, conservative bank angles). The fix is not more parameter tuning — it's switching to velocity control or attitude control. See `drone_racing.md` Section 7.
+  - **Position controller ceiling**: If you're in position mode and lap times have plateaued despite trying different lookahead values, path shapes, and approach geometries, you've likely hit PX4's internal speed limits (~12 m/s horizontal, conservative bank angles). The fix is not more parameter tuning — it's changing how you control the drone. See `drone_racing.md` Sections 2 and 7, and the control modes in `mavlink_interface.md`.
   - **Gate alignment ceiling**: If gate 8 (or the hardest gate) keeps failing at similar margins regardless of approach strategy, the issue is geometric — the approach/through waypoint pattern can only do so much. Consider corner-cutting offsets or per-gate parameter tuning.
   - **Architecture ceiling**: If every incremental tweak gives < 0.3s improvement, the current code structure may be maxed out. Consider a wholesale restructure rather than continued tuning.
 

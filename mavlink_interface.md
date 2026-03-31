@@ -145,7 +145,7 @@ await drone.offboard.set_attitude(Attitude(
 ))
 ```
 
-**Hover thrust discovery**: The thrust_value for level hover is unknown a priori and varies by drone model. To find it: command level attitude (roll=0, pitch=0), start at thrust_value=0.3, and increment by 0.05 while observing vertical velocity from ODOMETRY. Hover thrust is the value where vertical velocity is approximately 0. For the PX4 SITL x500 model, hover thrust is typically around 0.5, but always verify empirically. Record the result in `notebook.md` — it's the foundation for all attitude-mode flight.
+**Hover thrust discovery**: The thrust_value for level hover is unknown a priori and varies by drone model. To find it: command level attitude (roll=0, pitch=0), start at thrust_value=0.3, and increment by 0.05 while observing vertical velocity from ODOMETRY. Hover thrust is the value where vertical velocity is approximately 0. For the PX4 SITL x500 model, hover thrust is typically around 0.5, but always verify empirically. This value is the foundation for all attitude-mode flight.
 
 **When to use**: When you want direct control over the drone's orientation. Best for aggressive maneuvers where you need precise bank angles and thrust management. Requires you to manage altitude and speed yourself through the attitude commands. This is the Phase C control mode — highest performance ceiling but highest crash risk.
 
@@ -175,7 +175,7 @@ await drone.offboard.set_velocity_ned(VelocityNedYaw(
 ))
 ```
 
-**Warning about pure velocity mode**: `VelocityNedYaw` provides no position damping. The drone tracks the commanded velocity but has no concept of where it should be. This causes overshooting: the drone reaches the desired velocity but drifts past the target position. In practice, pure velocity mode is unstable for gate racing — use position+velocity feedforward instead.
+**Warning about pure velocity mode**: `VelocityNedYaw` provides no position damping. The drone tracks the commanded velocity but has no concept of where it should be. This causes overshooting: the drone reaches the desired velocity but drifts past the target position.
 
 MAVSDK access (position mode):
 ```python
@@ -201,28 +201,27 @@ await drone.offboard.set_position_velocity_ned(
 )
 ```
 
-**Position+Velocity combined** is the key intermediate between pure position mode and attitude control. PX4 uses the velocity to inform how fast to fly toward the position target. The position target still provides the alignment and convergence behavior. Use this for Phase A+ speed management. Note: the exact behavior (how PX4 blends position and velocity) is empirical — test it.
+**Position+Velocity combined**: PX4 uses the velocity to inform how fast to fly toward the position target. The position target still provides alignment and convergence behavior. The exact blending behavior (how PX4 weighs position vs. velocity) is empirical.
 
-**When to use**: When you want the sim's position/velocity controller to handle the low-level tracking. Simpler to use than attitude control. The sim's inner-loop controller will generate the attitude commands to track your setpoints. Good for initial development. May limit aggressiveness compared to direct attitude control because the inner-loop controller enforces its own safety margins.
+**Known issues**: When the position target and velocity direction diverge significantly (e.g., at a turn where position says "go to the next gate" but velocity still points along the previous straight), PX4's blending produces unpredictable trajectories. Also: switching between position+velocity and pure position mode can cause a jerk from the command discontinuity.
+
+**When to use**: When you want the sim's position/velocity controller to handle low-level tracking. The sim's inner-loop controller generates attitude commands to track your setpoints. Simplest to implement. The inner-loop controller enforces its own speed, tilt, and acceleration limits, which cap maximum performance.
 
 ## Control Mode Selection
 
-You have two control modes. The choice between them is a key design decision:
+Three control modes are available, each commanding at a different level of the PX4 control stack:
 
 **Position/Velocity mode** (SET_POSITION_TARGET_LOCAL_NED):
-- Easier to implement. Send where you want to go, the sim figures out how.
-- The sim's controller smooths out your commands — less risk of instability.
-- May limit maximum performance because the sim's controller is tuned for stability, not racing.
-- Good for Phase A and getting a baseline working.
+- Send where you want to go (and optionally how fast). PX4 figures out how.
+- PX4's controller smooths commands — lower instability risk.
+- Performance capped by PX4's internal limits (max velocity, max tilt, acceleration limits).
 
 **Attitude mode** (SET_ATTITUDE_TARGET):
-- Full control over the drone's orientation and thrust.
-- You manage the tradeoff between speed, altitude, and stability.
-- Higher performance ceiling but higher crash risk.
-- Requires you to understand the relationship between attitude, thrust, and trajectory.
-- Good for Phase C when squeezing maximum performance.
+- Full control over orientation and thrust. PX4 only runs the rate controller.
+- No speed or tilt limits beyond the drone's physical capabilities.
+- Higher performance ceiling. Requires managing altitude, speed, and trajectory.
 
-**Hybrid approach**: Start with position/velocity mode in Phase A. In Phase C, consider switching to attitude mode for sections of the course where you need more aggressive flight, while keeping position mode for safer sections.
+**Hybrid approaches**: Different control modes can be used for different sections of a course, or combined (e.g., position for alignment near gates, attitude for speed on straights). Mode transitions introduce command discontinuities that must be managed.
 
 ## Coordinate System
 
@@ -260,13 +259,12 @@ A forward-facing FPV camera is available in the competition sim. Specifications:
 
 Gates are visually distinctive from the environment. Expect them to be a consistent color/shape throughout the Virtual Qualifier 1 track.
 
-**PX4 SITL note**: The camera is NOT available in the default PX4 SITL x500 model used for development. The Gazebo sim can provide camera images, but this requires a drone model with a camera plugin (e.g., `gz_x500_depth` or a custom model). For Phase A and Phase A+, vision is not needed — odometry provides position. Phase B (perception integration) requires either: (a) setting up a camera in the Gazebo sim, or (b) waiting for the competition sim which includes the FPV camera. Plan accordingly.
+**PX4 SITL note**: The camera is NOT available in the default PX4 SITL x500 model. The Gazebo sim can provide camera images, but this requires a drone model with a camera plugin (e.g., `gz_x500_depth` or a custom model). When using odometry-based navigation, the camera is not needed. Vision-based gate detection requires either setting up a camera in the Gazebo sim or waiting for the competition sim which includes the FPV camera.
 
-## Practical Tips
+## Practical Notes
 
-1. **Start simple**: Get a connection working, read telemetry, hover in place. Then add waypoint following. Then optimize.
-2. **Log everything**: In early experiments, log all telemetry to a file so you can analyze offline. This helps populate the lab notebook with empirical drone/sim characteristics.
-3. **Async architecture**: MAVSDK is async (Python asyncio). Your main loop will be an async function that reads telemetry, computes commands, and sends them. Don't block the event loop with heavy computation — offload to a thread if needed.
-4. **Command latency**: There will be some latency between sending a command and seeing its effect in telemetry. Measure this early — it affects how far ahead you need to plan.
-5. **Telemetry bounds command rate**: Your effective control rate is bounded by the odometry update rate (~50 Hz), not your command send rate, if you read odometry on every loop iteration. See "Telemetry Rate" section above.
-6. **Sim determinism**: The spec says environmental conditions are deterministic. In practice, expect ~0.5s run-to-run variance from async scheduling jitter. If you see variance > 1.0s, something is wrong.
+1. **Async architecture**: MAVSDK is async (Python asyncio). The main loop is an async function that reads telemetry, computes commands, and sends them. Don't block the event loop with heavy computation — offload to a thread if needed.
+2. **Command latency**: There is latency between sending a command and seeing its effect in telemetry. This affects how far ahead the controller must plan.
+3. **Telemetry bounds command rate**: Effective control rate is bounded by the odometry update rate (~50 Hz), not the command send rate, if odometry is read on every loop iteration. See "Telemetry Rate" section above.
+4. **Sim determinism**: The spec says environmental conditions are deterministic. In practice, expect ~0.5s run-to-run variance from async scheduling jitter. Variance > 1.0s suggests a bug.
+5. **Offboard failsafe**: If commands stop arriving, PX4 triggers a failsafe (hover, then land). The command stream must be maintained continuously.
