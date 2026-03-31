@@ -24,7 +24,7 @@ APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
 LOOKAHEAD = 10.0        # meters ahead on polyline path
-COMMAND_RATE_HZ = 100
+COMMAND_RATE_HZ = 50
 
 
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
