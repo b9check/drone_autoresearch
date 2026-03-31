@@ -1,19 +1,16 @@
 """
-pilot.py — Multi-waypoint path lookahead with gate alignment protection.
+pilot.py — Phase A+: position lookahead with aligned velocity feedforward.
 
-For each gate, two waypoints align the drone with the gate normal:
-1. Approach point: 3m before gate along -normal (align heading)
-2. Through point: 2m past gate along +normal (ensure passage)
-
-The drone follows the polyline path with a lookahead target. The lookahead
-walks along the path but STOPS at approach waypoints (even indices) to
-preserve gate alignment.
+Same path planning as Phase A (approach/through waypoints, 10m lookahead,
+hard stops at difficult turns). Adds velocity feedforward aligned with the
+position target direction. Velocity magnitude is proportional to distance
+to target, so it naturally decays near hard stops.
 """
 
 import asyncio
 import math
 import numpy as np
-from mavsdk.offboard import PositionNedYaw
+from mavsdk.offboard import PositionNedYaw, VelocityNedYaw
 
 
 # ============================================================================
@@ -26,8 +23,12 @@ GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
 LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
 
-
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
+
+# Phase A+ velocity feedforward
+VEL_SCALE = 1.2         # velocity = VEL_SCALE * distance_to_target (m/s per m)
+VEL_MAX = 12.0          # cap velocity magnitude (m/s)
+VEL_MIN_DIST = 1.0      # zero velocity when target closer than this (m)
 
 
 async def run(drone, gates):
@@ -64,15 +65,20 @@ async def run(drone, gates):
                                      hard_stop_gates)
 
         delta = cmd_target - position
+        dist_to_target = np.linalg.norm(delta)
         yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-        await drone.offboard.set_position_ned(
-            PositionNedYaw(
-                north_m=cmd_target[0],
-                east_m=cmd_target[1],
-                down_m=cmd_target[2],
-                yaw_deg=yaw_deg,
-            )
+        # Velocity feedforward: same direction as position target
+        if dist_to_target > VEL_MIN_DIST:
+            vel_dir = delta / dist_to_target
+            vel_mag = min(dist_to_target * VEL_SCALE, VEL_MAX)
+            vel = vel_dir * vel_mag
+        else:
+            vel = np.zeros(3)
+
+        await drone.offboard.set_position_velocity_ned(
+            PositionNedYaw(cmd_target[0], cmd_target[1], cmd_target[2], yaw_deg),
+            VelocityNedYaw(vel[0], vel[1], vel[2], yaw_deg),
         )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
