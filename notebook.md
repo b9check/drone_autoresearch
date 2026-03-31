@@ -35,3 +35,38 @@ Empirical discoveries about the simulator, drone, track, and control problem. Th
 - Lap time increased from ~14.7s (7 gates) to 21.2s (8 gates) — the extra waypoints add path length. Average 2.65s/gate vs 2.1s/gate baseline.
 - Consecutive through→approach distances range from 5.2m to 7.3m, all safely above GATE_REACHED_DIST=2.0m.
 - Gate 8 alignment depends on gate 7's through waypoint setting up the heading. Approach+through for gate 8 alone (centers for 1-7) still misses — the drone's uncontrolled heading from gate 7 center causes curving. Must use approach+through for ALL gates.
+
+## 2026-03-29 — Lookahead Blending Optimization
+
+- Lookahead blending on through→approach (inter-gate) segments: huge win. 4m lookahead → 20.3s, 6m → 18.5s.
+- Adding gentle blending (0.3→0.5) on approach→through also helps: 17.1s → 16.6s.
+- Gate 8 is extremely sensitive to alignment changes. Reducing approach dist to 2.5m or through dist to 1.5m causes gate 8 miss. 3.0m approach and 2.0m through are minimum safe values.
+- Switch radius 3.0m also misses gate 8 — too early transition from approach waypoint.
+- Current best: 16.6s, 8/8 gates. Lookahead with 6m distance, 0.8/0.5 blend (through/approach).
+- The PX4 position controller's smoothing is the main speed limiter — it decelerates toward each commanded position. Lookahead partially defeats this by commanding a blended position further ahead.
+
+## 2026-03-30 — Multi-Waypoint Path Lookahead
+
+- Multi-waypoint walk_along_path with alignment protection at approach waypoints: 10.5s, 8/8 gates. Major improvement from single-blend (13.2s).
+- The walk function walks LOOKAHEAD=10m along the polyline starting from current waypoint. It stops when reaching an approach waypoint (even index) beyond the immediate next, forcing alignment before each gate.
+- GATE_REACHED_DIST=2.0m is the right threshold for 3m/2m approach/through. Shorter waypoints (1.5m/1m) cause the drone to skip all waypoints within 2m radius. Reducing approach/through requires reducing GATE_REACHED_DIST proportionally.
+- 12m lookahead with multi-wp walk: drone skips waypoints entirely and gets stuck. 10m is the sweet spot.
+- 3m position overshoot: fast on straights (gates 1-4 in 5.2s) but overshoots corners. Gate 5 took 11.3s instead of ~7s.
+- Gate passages at 10.5s: distances from center range 0.20-1.30m. Gates 1 (1.29m) and 8 (1.30m) are close to the 1.5m GATE_PASS_RADIUS limit. This is a risk factor for reliability.
+- Sim has intermittent "bind error: Address in use" when port 14540 isn't released between runs. Wait 15-20s after killing sim before relaunching.
+- Cubic spline through waypoints: 0/8 — spline cuts inside gate planes. Splines need gate-plane constraints.
+- set_position_velocity_ned with velocity feedforward: unstable. 12m/s overshoots corners, 3m/s breaks position tracking. Stick with pure PositionNedYaw.
+- Gate centers for gates 1-6 + approach/through for 7-8: still misses gate 8. ALL gates need approach/through.
+
+## 2026-03-30 — Session 2 Learnings
+
+- **Soft alignment (bleed 70%)**: tested, missed gate 8 (7/8). Hard stops are necessary for gate 8.
+- **Selective hard stops**: gates with <45° entry turns (2, 3, 7) skip hard stop. Improved 10.5→10.27s. This is a reliable optimization.
+- **Lookahead > 10m**: 11m consistently fails at gate 4 (3/8 in 3 consecutive runs). 10.5m is inconsistent (9.9s and 10.4s). 10m is the safe maximum.
+- **The root cause of >10m failure**: on easy-turn gates (2, 3, 7), the lookahead skips the approach waypoint, causing corner cutting. Gate 3 is the critical one — its exit feeds into gate 4's 60° hard turn. Any extra corner cutting at gate 3 misaligns gate 4.
+- **Approach dist 2.5m**: 8/8 gates but SLOWER (10.7s vs 10.3s). Shorter approach reduces alignment room, PX4 takes wider arcs.
+- **Through dist 1.5m**: fails badly (1/8). Gate passages too far from center. 2.0m is minimum safe through distance.
+- **Velocity feedforward**: set_position_velocity_ned with 15m velocity lookahead fails (3/8). The velocity direction conflicts with position hard stop at turns — PX4 averages both targets, takes bad trajectory.
+- **Adaptive lookahead** (speed-based): same failure mode as increased fixed lookahead. Any effective lookahead >10m on easy sections breaks gate 4.
+- **Current best: 10.27s**, commit fed9ef0, 10m lookahead + selective hard stops. Gate 8 at 1.35m from center (0.15m margin).
+- **Best score progression**: 21.2s → 20.3s → 18.5s → 17.1s → 16.6s → 16.4s → 14.1s → 13.3s → 13.2s → 10.5s → 10.27s.

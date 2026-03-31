@@ -211,5 +211,8 @@ results.tsv
 run.log
 *.log
 
+# Trajectory files — regenerated every run
+trajectories/
+
 # Claude Code personal memory
 .claude/memory/

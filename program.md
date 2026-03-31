@@ -137,13 +137,17 @@ LOOP FOREVER:
 2. **Form a hypothesis**: Based on your reading of the references, the notebook, previous results, and the current code, decide what to try. Write a one-line description of the experiment.
 3. **Modify the code**: Edit `pilot.py` (and optionally `score.py`) to implement your idea.
 4. **Git commit**: Commit the changes with a message describing the experiment.
-5. **Run the experiment**: `python prepare.py > run.log 2>&1`
-6. **Read results**: Extract the raw data and score from `run.log`. Use: `grep "^score:\|^lap_time:\|^gates_passed:\|^crashed:" run.log`. If the output is empty or malformed, `tail -n 50 run.log` to diagnose.
+5. **Run the experiment**: `python3 -u prepare.py > run.log 2>&1` (the `-u` flag disables output buffering so run.log is readable in real-time)
+6. **Read results**: Extract the raw data and score from `run.log`. Use: `grep -a "^score:\|^lap_time:\|^gates_passed:\|^crashed:" run.log` (the `-a` flag handles binary data that MAVSDK sometimes writes to stderr). If the output is empty or malformed, `tail -n 50 run.log` to diagnose.
 7. **Log results**: Append to `results.tsv`.
 8. **Update notebook**: If you learned something generalizable about the sim, the drone, the track, or the control problem, write it in `notebook.md`. See "Lab Notebook" below.
 9. **Keep or discard**:
    - If the score improved (lower): **keep**. The branch advances.
-   - If the score is equal or worse: **discard**. `git reset --hard` to the previous commit. (Note: `notebook.md` is never reverted — discoveries persist even from failed experiments. Stash it before reset if needed.)
+   - If the score is equal or worse: **discard**. Revert only the files you changed:
+     ```
+     git checkout HEAD~1 -- pilot.py score.py && git commit -m "discard: <reason>"
+     ```
+     This is surgical — `notebook.md`, `results.tsv`, and all other files are untouched. If you only changed pilot.py, you can omit score.py. Do NOT use `git reset --hard` as it destroys uncommitted changes to other files.
    - If the run crashed: use judgment. Fix trivial bugs and re-run. If the idea is fundamentally broken, discard and move on.
 10. **Repeat**.
 
@@ -244,7 +248,7 @@ Read `notebook.md` before planning each experiment. Your past self already disco
 
 ### Notebook survives reverts
 
-When you `git reset --hard` after a failed experiment, `notebook.md` must not be lost. Before any reset, ensure the notebook is preserved (e.g., stash it, copy it out, or keep it untracked by git). The notebook is append-only — never delete previous entries, only add new ones.
+The surgical discard method (`git checkout HEAD~1 -- pilot.py`) does not touch `notebook.md`, so it automatically survives. The notebook is append-only — never delete previous entries, only add new ones.
 
 ## Design Philosophy
 
@@ -270,6 +274,15 @@ Don't just randomly perturb numbers. Before each experiment, articulate a hypoth
 
 When an experiment fails (crash or worse score), don't just discard and move on. Spend a moment understanding WHY it failed. The failure mode often points directly at the next good experiment. If aggressive cornering caused a crash, the next experiment should be "slightly less aggressive cornering" or "add a safety margin on corner entry speed," not an unrelated change.
 
+## Time Discipline
+
+**Getting stuck is unacceptable.** The experiment loop must keep moving.
+
+- **Thinking between experiments: MAX 60 seconds.** Form your hypothesis, edit the code, commit, and run. Do not over-analyze or second-guess. Quick iterations beat careful planning.
+- **Sim run timeout: 2 minutes.** If `prepare.py` hasn't returned output in 2 minutes, something is wrong. Kill it and retry. (The harness auto-aborts stuck runs in 30s, so this is a last resort.)
+- **Analysis after a run: MAX 30 seconds.** Read the results, log them, decide keep/discard, move on.
+- **If stuck on a problem for 3+ failed experiments:** Step back, try a completely different approach, or simplify. Do not keep tweaking the same parameter.
+
 ## NEVER STOP
 
 Once the experiment loop has begun, do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?" The human may be asleep, away from the computer, and expects you to continue working **indefinitely** until manually stopped.
@@ -286,12 +299,19 @@ If you run out of ideas:
 
 The loop runs until the human interrupts you. Period.
 
-You could be running while the human sleeps. If each experiment takes ~3 minutes (sim run + overhead), you can run ~20/hour, ~160 overnight. The human wakes up to a results log and (hopefully) a faster drone.
+You could be running while the human sleeps. If each experiment takes ~1 minute (sim startup + flight + teardown), you can run ~60/hour, ~480 overnight. The human wakes up to a results log and (hopefully) a faster drone.
 
 ## Timeout and Error Handling
 
-- **Normal run**: Should complete in under 8 minutes (the sim's max run duration). Allow 10 minutes total including startup and teardown.
-- **If a run exceeds 10 minutes**: Kill it, log as crash, discard and revert.
-- **If the sim crashes**: Attempt to restart it. If you can't restart after 3 attempts, stop the loop and leave a note in results.tsv explaining the failure. The human will fix the sim when they return.
-- **If your code crashes**: Read the traceback. If it's a trivial bug (typo, import error, off-by-one), fix it and re-run without counting as a separate experiment. If the idea itself is broken, log as crash and move on.
+prepare.py handles most failure modes automatically:
+- **Arm retries**: 3 attempts with 3s backoff before giving up on COMMAND_DENIED.
+- **Top-level retry**: If the entire run fails with a transient error (arm_failed, connection_timeout, etc.), prepare.py retries up to 3 times.
+- **Port cleanup**: `fuser -k 14540/udp` runs during sim teardown to prevent bind errors.
+- **Gate progress timeout**: If no new gate is passed in 30s, the run aborts early instead of waiting 8 minutes.
+
+For failures that prepare.py can't handle:
+- **If prepare.py hasn't returned in 2 minutes**: Something is wrong. Kill it and retry. (This is a last resort — the harness auto-aborts stuck runs.)
+- **If 3 consecutive prepare.py invocations fail**: The sim environment is broken. Stop the loop and leave a note in results.tsv. The human will fix it.
+- **If your code crashes**: Read the traceback (full stack trace is printed to run.log). If it's a trivial bug (typo, import error, off-by-one), fix it and re-run without counting as a separate experiment. If the idea itself is broken, log as crash and move on.
 - **If score.py crashes**: Fix it immediately. A broken score function halts the entire loop.
+- **NEVER run prepare.py in background mode.** Background runs create orphaned PX4/Gazebo processes that block future runs with port conflicts. Always run in foreground and wait for completion.

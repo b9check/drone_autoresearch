@@ -22,6 +22,7 @@ import os
 import subprocess
 import signal
 import importlib
+import traceback
 import numpy as np
 from mavsdk import System
 from mavsdk.offboard import PositionNedYaw, OffboardError
@@ -244,7 +245,13 @@ def kill_sim():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-    time.sleep(5)
+    # Kill anything holding the MAVSDK port to prevent bind errors
+    subprocess.run(
+        ["fuser", "-k", "14540/udp"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    time.sleep(2)
 
 
 def launch_sim():
@@ -358,12 +365,20 @@ async def _fly_experiment(pilot, score):
         print("ERROR: Position estimate timeout")
         return make_error_result("position_timeout")
 
-    # Arm
-    print("Arming...")
-    try:
-        await drone.action.arm()
-    except ActionError as e:
-        print(f"ERROR: Arming failed: {e}")
+    # Arm (with retry — PX4 SITL sometimes needs a few seconds after health OK)
+    armed = False
+    for arm_attempt in range(3):
+        print(f"Arming (attempt {arm_attempt + 1}/3)...")
+        try:
+            await drone.action.arm()
+            armed = True
+            break
+        except ActionError as e:
+            print(f"  Arm attempt {arm_attempt + 1} failed: {e}")
+            if arm_attempt < 2:
+                await asyncio.sleep(3)
+    if not armed:
+        print("ERROR: Arming failed after 3 attempts")
         return make_error_result("arm_failed")
 
     # Takeoff
@@ -410,13 +425,20 @@ async def _fly_experiment(pilot, score):
         for g in GATES
     ]
 
+    GATE_PROGRESS_TIMEOUT = 30.0  # abort if no new gate in this many seconds
+
     # Run pilot and gate monitor concurrently
     async def monitor_gates():
         """Poll position and check gate passage."""
         nonlocal crashed, timeout
+        last_gate_time = time.time()
         while not tracker.all_passed:
             elapsed = time.time() - start_time
             if elapsed > MAX_RUN_DURATION:
+                timeout = True
+                return
+            if time.time() - last_gate_time > GATE_PROGRESS_TIMEOUT:
+                print(f"No gate progress in {GATE_PROGRESS_TIMEOUT}s, aborting.")
                 timeout = True
                 return
 
@@ -430,6 +452,7 @@ async def _fly_experiment(pilot, score):
                     trajectory.append((elapsed, pos[0], pos[1], pos[2]))
                     passed = tracker.update(pos)
                     if passed:
+                        last_gate_time = time.time()
                         g = tracker.passed[-1]
                         elapsed = time.time() - start_time
                         print(
@@ -450,6 +473,7 @@ async def _fly_experiment(pilot, score):
             await pilot.run(drone, gate_info)
         except Exception as e:
             print(f"PILOT CRASHED: {e}")
+            traceback.print_exc()
             crashed = True
 
     # Run both concurrently — pilot flies, monitor watches gates
@@ -481,11 +505,12 @@ async def _fly_experiment(pilot, score):
     else:
         lap_time = 0.0
 
-    # Land
+    # Land (skip the wait on failed/timed-out runs — sim is about to be killed anyway)
     print("Landing...")
     try:
         await drone.action.land()
-        await asyncio.sleep(3)
+        if tracker.all_passed:
+            await asyncio.sleep(2)
     except Exception:
         pass
 
@@ -551,9 +576,23 @@ def print_summary(results):
 
 
 async def main():
-    results = await run_experiment()
+    transient_errors = {"arm_failed", "connection_timeout", "position_timeout", "sim_startup_timeout"}
+    for attempt in range(3):
+        results = await run_experiment()
+        if results.get("error") not in transient_errors:
+            break
+        print(f"Transient failure ({results['error']}), retrying ({attempt + 1}/3)...")
     print_summary(results)
 
 
+def _cleanup_on_exit(signum, frame):
+    """Ensure PX4/Gazebo processes are killed on interrupt."""
+    print(f"\nCaught signal {signum}, cleaning up...")
+    kill_sim()
+    sys.exit(1)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, _cleanup_on_exit)
+    signal.signal(signal.SIGTERM, _cleanup_on_exit)
     asyncio.run(main())
