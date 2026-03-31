@@ -146,7 +146,7 @@ Recognize which type of experiment you're running and use the appropriate method
 
 **Structural changes** (new algorithm, new waypoint strategy, different control mode): Use the standard one-change-per-experiment loop. Change one thing, test it, keep or discard.
 
-**Parameter tuning** (lookahead distance, speed threshold, approach offset): Don't burn one experiment per value. Write a parameter sweep within a single experiment — run the course N times with different values, pick the best, and commit with that value. A sweep of 5 values in one experiment is faster and more informative than 5 sequential experiments.
+**Parameter tuning** (lookahead distance, speed threshold, approach offset): Don't burn one experiment per value. Write a parameter sweep within a single experiment — run the course N times with different values, pick the best, and commit with that value. A sweep of 5 values in one experiment is faster and more informative than 5 sequential experiments. Note: `prepare.py` runs one flight per invocation, so you'll need to script the sweep yourself (e.g., a loop in a shell script or a wrapper in `pilot.py` that varies the parameter and calls the sim multiple times).
 
 **Single-variable discipline**: Never combine two unrelated changes in one experiment. If you change approach distance AND speed limit simultaneously, you can't tell which one caused the result. The exception is when two changes are mechanically coupled (e.g., reducing approach distance requires reducing switch radius proportionally).
 
