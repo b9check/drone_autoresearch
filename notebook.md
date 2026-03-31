@@ -96,4 +96,8 @@ Empirical discoveries about the simulator, drone, track, and control problem. Th
 - **Time-based target progression**: broken hard-stop release logic. Gave excellent gate margins (0.09-0.54m!) but 15.7s — much slower. Abandoned.
 - **New best: 9.8s**, commit 8a85b85. Config: 10m lookahead, gate 3 relaxed, gate 8 4m approach, easy gates 0.5m offsets, hard stops {0, 4, 5, 7}.
 - **Best score progression**: ... → 10.27s → 10.1s → 10.0s → 9.8s.
-- **Session 3 end state**: commit 8a85b85. Next: try even smaller offsets for easy gates (0.25m or 0m), or optimize gate 3's offset since it's relaxed.
+- **0.25m easy offsets**: no further gain over 0.5m (10.6s). 0.5m is the sweet spot — smaller doesn't help.
+- **Session 3 end state**: commit 8904687. Best config: 10m lookahead, gate 3 relaxed, gate 8 4m approach, easy gates 0.5m approach/through, hard stops {0, 4, 5, 7}. Best: 9.8s, typical: 10.5-10.6s.
+- **What definitively doesn't work (exhaustive)**: velocity feedforward (any magnitude), VelocityNedYaw hybrid, attitude control (even with correct hover thrust 0.387), set_maximum_speed, lookahead >10m, corner-cutting offsets, per-gate through distances, gate 0/4/5 relaxation.
+- **What works**: gate 3 hard stop relaxation (~0.5s), easy gate 0.5m offsets (~0.3s), gate 8 4m approach (reliability).
+- **Next session ideas**: optimize gate 3's approach/through distance (it's relaxed, so maybe 0.5m works there too); try a pre-computed smooth path through the course instead of waypoints; investigate if GATE_REACHED_DIST can be tuned per-gate.

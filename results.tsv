@@ -50,4 +50,5 @@ a29e562	486.554	0.0	3/8	discard	3m/s velocity hint — breaks gate 3→4 transit
 0097960	15.712	15.7	8/8	discard	time-based target 10m/s — hard stop release broken, 15.7s
 9caa5f2	10.909	10.9	8/8	discard	gate 0 relaxation — no effect
 8a85b85	9.804	9.8	8/8	keep	easy gates 0.5m approach/through (9.8/10.5/10.6 in 3 runs)
+7f6cfec	10.552	10.6	8/8	discard	easy gates 0.25m — same as 0.5m, no further gain
 bc35de1	10.146	10.1	8/8	keep	gate 8 approach 4m — margin 1.25→1.23m (was 1.48), verified 2 runs
