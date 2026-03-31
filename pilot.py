@@ -67,7 +67,7 @@ async def run(drone, gates):
         # Check if this is an easy inter-gate through segment
         is_through = (idx % 2 == 1)
         next_gate_idx = (idx + 1) // 2
-        next_is_easy = (next_gate_idx < len(gates)
+        next_is_easy = (next_gate_idx <= 2
                         and next_gate_idx not in hard_stop_gates)
 
         if is_through and next_is_easy and idx + 1 < len(waypoints):
