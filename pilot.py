@@ -85,37 +85,36 @@ async def run(drone, gates):
 
 
 def compute_corner_offsets(gates):
-    """Compute per-gate offsets that cut corners by shifting toward inside of turns."""
+    """Shift gate crossing toward line connecting prev/next gate (shortens path)."""
     offsets = []
     for i, gate in enumerate(gates):
         if i == 0 or i == len(gates) - 1:
-            offsets.append(np.zeros(3))  # no offset for first/last gate
-            continue
-
-        # Direction from previous gate to this gate, and this gate to next
-        incoming = gates[i]["position"] - gates[i - 1]["position"]
-        outgoing = gates[i + 1]["position"] - gates[i]["position"]
-        incoming = incoming / np.linalg.norm(incoming)
-        outgoing = outgoing / np.linalg.norm(outgoing)
-
-        # Bisector points toward outside of turn; negate for inside
-        bisector = incoming + outgoing
-        bisector_norm = np.linalg.norm(bisector)
-        if bisector_norm < 0.01:
             offsets.append(np.zeros(3))
             continue
 
-        # Project onto gate plane (perpendicular to normal)
+        A = gates[i - 1]["position"]
+        B = gates[i + 1]["position"]
+        C = gate["position"]
         n = gate["normal"]
-        plane_component = bisector - np.dot(bisector, n) * n
-        plane_norm = np.linalg.norm(plane_component)
-        if plane_norm < 0.01:
+
+        # Perpendicular from gate center to the line A→B
+        AB = B - A
+        AB_len = np.linalg.norm(AB)
+        if AB_len < 0.01:
             offsets.append(np.zeros(3))
             continue
+        AB_dir = AB / AB_len
+        AC = C - A
+        perp = AC - np.dot(AC, AB_dir) * AB_dir  # from AB line to gate center
 
-        # Offset toward inside of turn (negate bisector), capped
-        offset = -(plane_component / plane_norm) * CORNER_CUT_MAX
-        offsets.append(offset)
+        # Move crossing toward AB line, projected onto gate plane
+        toward_line = -perp
+        toward_line = toward_line - np.dot(toward_line, n) * n  # in-plane only
+        mag = np.linalg.norm(toward_line)
+        if mag < 0.01:
+            offsets.append(np.zeros(3))
+        else:
+            offsets.append(toward_line / mag * min(mag, CORNER_CUT_MAX))
 
     return offsets
 
