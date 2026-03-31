@@ -30,9 +30,9 @@ COMMAND_RATE_HZ = 50
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
 
 # Phase C: attitude control on straights
-ATTITUDE_PITCH = -25.0   # degrees, nose down for forward acceleration
-ATTITUDE_THRUST = 0.45   # thrust for altitude hold at ATTITUDE_PITCH
-ATTITUDE_SWITCH_DIST = 6.0  # switch to position mode this close to approach wp
+ATTITUDE_PITCH = -15.0   # degrees, nose down for forward acceleration
+ATTITUDE_THRUST = 0.40   # thrust for altitude hold at ATTITUDE_PITCH
+ATTITUDE_SWITCH_DIST = 8.0  # switch to position mode this close to approach wp
 
 
 async def run(drone, gates):
