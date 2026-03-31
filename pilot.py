@@ -34,10 +34,11 @@ async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
     # Build waypoint sequence: approach + through per gate
     waypoints = []
-    for gate in gates:
+    for i, gate in enumerate(gates):
         n = gate["normal"]
         c = gate["position"]
-        waypoints.append(c - APPROACH_DIST * n)  # even = approach
+        a_dist = 4.0 if i == len(gates) - 1 else APPROACH_DIST
+        waypoints.append(c - a_dist * n)  # even = approach
         waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
     # Precompute which gates have easy turns (don't need hard stop)
