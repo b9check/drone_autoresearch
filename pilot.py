@@ -50,7 +50,7 @@ async def run(drone, gates):
         if i == len(gates) - 1:
             ad, td = 4.0, THROUGH_DIST  # last gate: 4m approach
         elif i not in hard_stop_gates and i != 0:
-            ad, td = 0.25, 0.25  # easy gates: near-zero offset, path straight through
+            ad, td = 0.5, 0.5  # easy gates: minimal offset, path stays straight
         else:
             ad, td = APPROACH_DIST, THROUGH_DIST
         waypoints.append(c - ad * n)             # even = approach
