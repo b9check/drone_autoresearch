@@ -32,6 +32,16 @@ EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard st
 
 async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
+    # Build waypoint sequence: approach + through per gate
+    # Gate 8 (idx 7) gets longer approach for alignment (tight 30° heading change)
+    waypoints = []
+    for i, gate in enumerate(gates):
+        n = gate["normal"]
+        c = gate["position"]
+        ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
+        waypoints.append(c - ad * n)             # even = approach
+        waypoints.append(c + THROUGH_DIST * n)   # odd = through
+
     # Precompute which gates have easy turns (don't need hard stop)
     hard_stop_gates = set()
     hard_stop_gates.add(0)  # first gate always needs alignment
@@ -39,17 +49,6 @@ async def run(drone, gates):
         cos_angle = np.dot(gates[i - 1]["normal"], gates[i]["normal"])
         if cos_angle <= EASY_TURN_THRESHOLD:
             hard_stop_gates.add(i)
-
-    # Build waypoint sequence: approach + through per gate
-    # Per-gate distances: 4m approach for last gate, 1m through for easy gates
-    waypoints = []
-    for i, gate in enumerate(gates):
-        n = gate["normal"]
-        c = gate["position"]
-        ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
-        td = 1.0 if i not in hard_stop_gates else THROUGH_DIST
-        waypoints.append(c - ad * n)             # even = approach
-        waypoints.append(c + td * n)             # odd = through
 
     idx = 0
     while idx < len(waypoints):
