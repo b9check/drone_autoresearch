@@ -39,9 +39,8 @@ async def run(drone, gates):
         n = gate["normal"]
         c = gate["position"]
         ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
-        td = 3.0 if i == len(gates) - 2 else THROUGH_DIST  # gate 7 through 3m for gate 8 setup
         waypoints.append(c - ad * n)             # even = approach
-        waypoints.append(c + td * n)             # odd = through
+        waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
     # Hard stop gates need alignment; easy turns let lookahead flow through
     # Gate 3 is 60° turn but gate 4's approach handles alignment → relax gate 3
