@@ -23,9 +23,7 @@ from mavsdk.offboard import PositionNedYaw
 APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
-LOOKAHEAD_MIN = 10.0    # meters ahead at low speed (proven safe)
-LOOKAHEAD_MAX = 13.0    # meters ahead at high speed
-LOOKAHEAD_TIME = 1.2    # seconds ahead (speed * time = lookahead)
+LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
 
 
@@ -52,20 +50,17 @@ async def run(drone, gates):
 
     idx = 0
     while idx < len(waypoints):
-        state = await get_state(drone)
-        if state is None:
+        position = await get_position(drone)
+        if position is None:
             await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
             continue
 
-        position, velocity = state
         dist_to_wp = np.linalg.norm(waypoints[idx] - position)
         if dist_to_wp < GATE_REACHED_DIST:
             idx += 1
             continue
 
-        speed = np.linalg.norm(velocity[:2])
-        lookahead = np.clip(speed * LOOKAHEAD_TIME, LOOKAHEAD_MIN, LOOKAHEAD_MAX)
-        cmd_target = walk_along_path(waypoints, idx, position, lookahead,
+        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
                                      hard_stop_gates)
 
         delta = cmd_target - position
@@ -116,20 +111,14 @@ def walk_along_path(waypoints, idx, position, lookahead, hard_stop_gates):
     return waypoints[-1]
 
 
-async def get_state(drone):
-    """Get position and velocity from odometry. Returns (pos, vel) as np arrays in NED."""
+async def get_position(drone) -> np.ndarray:
+    """Get current position from odometry. Returns np.array([x, y, z]) in NED."""
     try:
         async for odom in drone.telemetry.odometry():
-            pos = np.array([
+            return np.array([
                 odom.position_body.x_m,
                 odom.position_body.y_m,
                 odom.position_body.z_m,
             ])
-            vel = np.array([
-                odom.velocity_body.x_m_s,
-                odom.velocity_body.y_m_s,
-                odom.velocity_body.z_m_s,
-            ])
-            return pos, vel
     except Exception:
         return None
