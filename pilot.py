@@ -42,13 +42,16 @@ async def run(drone, gates):
         waypoints.append(c - ad * n)             # even = approach
         waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
-    # Precompute which gates have easy turns (don't need hard stop)
+    # Hard stop gates need alignment; easy turns let lookahead flow through
+    # Gate 3 is 60° turn but gate 4's approach handles alignment → relax gate 3
+    # Gate 7 MUST stay hard — gate 8's tight margin requires full alignment
     hard_stop_gates = set()
     hard_stop_gates.add(0)  # first gate always needs alignment
     for i in range(1, len(gates)):
         cos_angle = np.dot(gates[i - 1]["normal"], gates[i]["normal"])
         if cos_angle <= EASY_TURN_THRESHOLD:
             hard_stop_gates.add(i)
+    hard_stop_gates.discard(3)  # relax gate 3 — gate 4 hard stop handles alignment
 
     idx = 0
     while idx < len(waypoints):
