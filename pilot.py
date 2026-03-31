@@ -13,7 +13,7 @@ preserve gate alignment.
 import asyncio
 import math
 import numpy as np
-from mavsdk.offboard import PositionNedYaw, VelocityNedYaw
+from mavsdk.offboard import PositionNedYaw
 
 
 # ============================================================================
@@ -28,8 +28,6 @@ COMMAND_RATE_HZ = 50
 
 
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
-
-VEL_BOOST = 3.0          # gentle velocity hint (m/s), same direction as position target
 
 
 async def run(drone, gates):
@@ -68,19 +66,15 @@ async def run(drone, gates):
                                      hard_stop_gates)
 
         delta = cmd_target - position
-        dist_to_target = np.linalg.norm(delta)
         yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-        # Gentle velocity hint in same direction as position target
-        if dist_to_target > 2.0:
-            vel_dir = delta / dist_to_target
-            vel = vel_dir * VEL_BOOST
-        else:
-            vel = np.zeros(3)
-
-        await drone.offboard.set_position_velocity_ned(
-            PositionNedYaw(cmd_target[0], cmd_target[1], cmd_target[2], yaw_deg),
-            VelocityNedYaw(vel[0], vel[1], vel[2], yaw_deg),
+        await drone.offboard.set_position_ned(
+            PositionNedYaw(
+                north_m=cmd_target[0],
+                east_m=cmd_target[1],
+                down_m=cmd_target[2],
+                yaw_deg=yaw_deg,
+            )
         )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
