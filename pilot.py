@@ -80,8 +80,8 @@ async def run(drone, gates):
             delta = next_wp - position
             yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-            # Altitude correction: maintain target altitude
-            alt_error = next_wp[2] - position[2]  # negative = too high
+            # Altitude correction: NED z is down, so more negative = higher
+            alt_error = position[2] - next_wp[2]  # positive = too low, need more thrust
             pitch_cos = math.cos(math.radians(ATT_PITCH))
             thrust = (ATT_HOVER + ATT_KP_ALT * alt_error) / pitch_cos
             thrust = max(0.1, min(0.8, thrust))
