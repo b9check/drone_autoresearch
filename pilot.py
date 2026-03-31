@@ -23,8 +23,8 @@ from mavsdk.offboard import PositionNedYaw
 APPROACH_DIST = 3.0     # meters before gate along -normal
 THROUGH_DIST = 2.0      # meters past gate along +normal
 GATE_REACHED_DIST = 2.0 # switch to next waypoint when this close
-LOOKAHEAD_MIN = 8.0     # meters ahead at low speed
-LOOKAHEAD_MAX = 12.0    # meters ahead at high speed
+LOOKAHEAD_MIN = 10.0    # meters ahead at low speed (proven safe)
+LOOKAHEAD_MAX = 13.0    # meters ahead at high speed
 LOOKAHEAD_TIME = 1.2    # seconds ahead (speed * time = lookahead)
 COMMAND_RATE_HZ = 50
 
