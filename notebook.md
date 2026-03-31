@@ -58,9 +58,15 @@ Empirical discoveries about the simulator, drone, track, and control problem. Th
 - set_position_velocity_ned with velocity feedforward: unstable. 12m/s overshoots corners, 3m/s breaks position tracking. Stick with pure PositionNedYaw.
 - Gate centers for gates 1-6 + approach/through for 7-8: still misses gate 8. ALL gates need approach/through.
 
-## 2026-03-30 — Session End State
+## 2026-03-30 — Session 2 Learnings
 
-- **Current pilot.py (commit 71dec67) is UNTESTED.** It has "soft alignment: bleed 70% of remaining lookahead at approach points" — a change from hard-stop to soft-bleed at approach waypoints. Never got a clean run due to port conflicts.
-- **Last validated code: commit dc7f8cc, 10.5s, 8/8 gates.** If 71dec67 fails, revert to dc7f8cc's logic (hard stop at approach waypoints: `return waypoints[j]`).
-- **Best score progression**: 21.2s → 20.3s → 18.5s → 17.1s → 16.6s → 16.4s → 14.1s → 13.3s → 13.2s → 10.5s.
-- The soft alignment experiment is worth testing first next session — it might be faster than 10.5s since it allows some blending past approach points instead of a hard stop.
+- **Soft alignment (bleed 70%)**: tested, missed gate 8 (7/8). Hard stops are necessary for gate 8.
+- **Selective hard stops**: gates with <45° entry turns (2, 3, 7) skip hard stop. Improved 10.5→10.27s. This is a reliable optimization.
+- **Lookahead > 10m**: 11m consistently fails at gate 4 (3/8 in 3 consecutive runs). 10.5m is inconsistent (9.9s and 10.4s). 10m is the safe maximum.
+- **The root cause of >10m failure**: on easy-turn gates (2, 3, 7), the lookahead skips the approach waypoint, causing corner cutting. Gate 3 is the critical one — its exit feeds into gate 4's 60° hard turn. Any extra corner cutting at gate 3 misaligns gate 4.
+- **Approach dist 2.5m**: 8/8 gates but SLOWER (10.7s vs 10.3s). Shorter approach reduces alignment room, PX4 takes wider arcs.
+- **Through dist 1.5m**: fails badly (1/8). Gate passages too far from center. 2.0m is minimum safe through distance.
+- **Velocity feedforward**: set_position_velocity_ned with 15m velocity lookahead fails (3/8). The velocity direction conflicts with position hard stop at turns — PX4 averages both targets, takes bad trajectory.
+- **Adaptive lookahead** (speed-based): same failure mode as increased fixed lookahead. Any effective lookahead >10m on easy sections breaks gate 4.
+- **Current best: 10.27s**, commit fed9ef0, 10m lookahead + selective hard stops. Gate 8 at 1.35m from center (0.15m margin).
+- **Best score progression**: 21.2s → 20.3s → 18.5s → 17.1s → 16.6s → 16.4s → 14.1s → 13.3s → 13.2s → 10.5s → 10.27s.
