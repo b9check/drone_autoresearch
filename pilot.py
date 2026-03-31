@@ -27,6 +27,9 @@ LOOKAHEAD = 10.0        # meters ahead on polyline path
 COMMAND_RATE_HZ = 50
 
 
+EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
+
+
 async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
     # Build waypoint sequence: approach + through per gate
@@ -36,6 +39,14 @@ async def run(drone, gates):
         c = gate["position"]
         waypoints.append(c - APPROACH_DIST * n)  # even = approach
         waypoints.append(c + THROUGH_DIST * n)   # odd = through
+
+    # Precompute which gates have easy turns (don't need hard stop)
+    hard_stop_gates = set()
+    hard_stop_gates.add(0)  # first gate always needs alignment
+    for i in range(1, len(gates)):
+        cos_angle = np.dot(gates[i - 1]["normal"], gates[i]["normal"])
+        if cos_angle <= EASY_TURN_THRESHOLD:
+            hard_stop_gates.add(i)
 
     idx = 0
     while idx < len(waypoints):
@@ -49,8 +60,8 @@ async def run(drone, gates):
             idx += 1
             continue
 
-        # Walk along path from current waypoint, but stop at approach points
-        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD)
+        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
+                                     hard_stop_gates)
 
         delta = cmd_target - position
         yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
@@ -67,8 +78,8 @@ async def run(drone, gates):
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
 
 
-def walk_along_path(waypoints, idx, position, lookahead):
-    """Walk lookahead meters along polyline. Stop at approach waypoints to preserve alignment."""
+def walk_along_path(waypoints, idx, position, lookahead, hard_stop_gates):
+    """Walk lookahead meters along polyline. Stop only at hard-stop approach waypoints."""
     current = waypoints[idx]
     dist_to_wp = np.linalg.norm(current - position)
 
@@ -80,9 +91,11 @@ def walk_along_path(waypoints, idx, position, lookahead):
     j = idx + 1
 
     while j < len(waypoints) and remaining > 0:
-        # Stop at approach waypoints (even indices) — they're alignment-critical
+        # Only stop at approach waypoints for hard turns
         if j % 2 == 0 and j > idx + 1:
-            return waypoints[j]
+            gate_idx = j // 2
+            if gate_idx in hard_stop_gates:
+                return waypoints[j]
 
         seg = waypoints[j] - prev
         seg_len = np.linalg.norm(seg)
