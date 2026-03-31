@@ -38,7 +38,7 @@ async def run(drone, gates):
     for i, gate in enumerate(gates):
         n = gate["normal"]
         c = gate["position"]
-        ad = 4.0 if i == len(gates) - 1 else APPROACH_DIST
+        ad = 5.0 if i == len(gates) - 1 else APPROACH_DIST
         waypoints.append(c - ad * n)             # even = approach
         waypoints.append(c + THROUGH_DIST * n)   # odd = through
 
