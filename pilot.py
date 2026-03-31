@@ -46,7 +46,7 @@ async def run(drone, gates):
     # Gate 3 is 60° turn but gate 4's approach handles alignment → relax gate 3
     # Gate 7 MUST stay hard — gate 8's tight margin requires full alignment
     hard_stop_gates = set()
-    hard_stop_gates.add(0)  # first gate always needs alignment
+    # Gate 0 straight ahead from takeoff — no alignment needed, skip hard stop
     for i in range(1, len(gates)):
         cos_angle = np.dot(gates[i - 1]["normal"], gates[i]["normal"])
         if cos_angle <= EASY_TURN_THRESHOLD:
