@@ -68,8 +68,12 @@ async def run(drone, gates):
         dist_to_target = np.linalg.norm(delta)
         yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
-        # Velocity feedforward: same direction as position target
-        if dist_to_target > VEL_MIN_DIST:
+        # Velocity feedforward: zero at hard-stop approach points for alignment
+        is_approach = (idx % 2 == 0)
+        gate_idx = idx // 2
+        at_hard_stop = is_approach and gate_idx in hard_stop_gates
+
+        if not at_hard_stop and dist_to_target > VEL_MIN_DIST:
             vel_dir = delta / dist_to_target
             vel_mag = min(dist_to_target * VEL_SCALE, VEL_MAX)
             vel = vel_dir * vel_mag
