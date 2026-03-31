@@ -13,7 +13,7 @@ preserve gate alignment.
 import asyncio
 import math
 import numpy as np
-from mavsdk.offboard import PositionNedYaw
+from mavsdk.offboard import Attitude, PositionNedYaw
 
 
 # ============================================================================
@@ -28,6 +28,11 @@ COMMAND_RATE_HZ = 50
 
 
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
+
+# Attitude control (used on easy through segments after hover thrust calibration)
+ATT_PITCH = -15.0        # degrees forward
+ATT_KP_ALT = 0.5         # altitude correction gain (strong)
+ATT_SWITCH_DIST = 5.0    # switch to position mode this close to next wp
 
 
 async def run(drone, gates):
@@ -53,6 +58,9 @@ async def run(drone, gates):
             hard_stop_gates.add(i)
     hard_stop_gates.discard(3)  # relax gate 3 — gate 4 hard stop handles alignment
 
+    # Measure hover thrust: command level attitude at test thrust for 1s
+    hover_thrust = await calibrate_hover(drone)
+
     idx = 0
     while idx < len(waypoints):
         position = await get_position(drone)
@@ -65,22 +73,75 @@ async def run(drone, gates):
             idx += 1
             continue
 
-        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
-                                     hard_stop_gates)
+        # Check if we should use attitude mode
+        is_through = (idx % 2 == 1)
+        next_gate_idx = (idx + 1) // 2
+        next_is_easy = (next_gate_idx < len(gates)
+                        and next_gate_idx not in hard_stop_gates)
+        next_wp = waypoints[idx + 1] if idx + 1 < len(waypoints) else None
 
-        delta = cmd_target - position
-        yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
-
-        await drone.offboard.set_position_ned(
-            PositionNedYaw(
-                north_m=cmd_target[0],
-                east_m=cmd_target[1],
-                down_m=cmd_target[2],
-                yaw_deg=yaw_deg,
+        if (is_through and next_is_easy and next_wp is not None
+                and np.linalg.norm(next_wp - position) > ATT_SWITCH_DIST
+                and hover_thrust > 0):
+            # Attitude mode with altitude hold
+            delta = next_wp - position
+            yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
+            alt_error = position[2] - next_wp[2]  # positive = too low
+            pitch_cos = math.cos(math.radians(ATT_PITCH))
+            thrust = (hover_thrust + ATT_KP_ALT * alt_error) / pitch_cos
+            thrust = max(0.1, min(0.8, thrust))
+            await drone.offboard.set_attitude(Attitude(
+                roll_deg=0.0, pitch_deg=ATT_PITCH,
+                yaw_deg=yaw_deg, thrust_value=thrust,
+            ))
+        else:
+            # Position mode: standard lookahead
+            cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
+                                         hard_stop_gates)
+            delta = cmd_target - position
+            yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
+            await drone.offboard.set_position_ned(
+                PositionNedYaw(cmd_target[0], cmd_target[1], cmd_target[2],
+                               yaw_deg)
             )
-        )
 
         await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
+
+
+async def calibrate_hover(drone):
+    """Measure hover thrust by binary search: find thrust that holds altitude."""
+    low, high = 0.2, 0.7
+    best = 0.37  # fallback
+    for _ in range(5):  # 5 iterations of binary search, ~2.5s total
+        test_thrust = (low + high) / 2
+        # Command level attitude at test thrust
+        pos_before = await get_position(drone)
+        if pos_before is None:
+            return best
+        await drone.offboard.set_attitude(Attitude(
+            roll_deg=0.0, pitch_deg=0.0, yaw_deg=0.0,
+            thrust_value=test_thrust,
+        ))
+        await asyncio.sleep(0.5)
+        pos_after = await get_position(drone)
+        if pos_after is None:
+            return best
+        vz = (pos_after[2] - pos_before[2]) / 0.5  # vertical velocity (NED: + = descending)
+        if vz > 0.1:  # descending → need more thrust
+            low = test_thrust
+        elif vz < -0.1:  # climbing → need less thrust
+            high = test_thrust
+        else:
+            best = test_thrust
+            break
+        best = test_thrust
+    # Return to position mode
+    await drone.offboard.set_position_ned(
+        PositionNedYaw(pos_after[0], pos_after[1], pos_after[2], 0.0)
+    )
+    await asyncio.sleep(0.5)
+    print(f"Calibrated hover thrust: {best:.3f}")
+    return best
 
 
 def walk_along_path(waypoints, idx, position, lookahead, hard_stop_gates):
