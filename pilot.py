@@ -29,9 +29,6 @@ COMMAND_RATE_HZ = 50
 
 EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard stop
 
-TARGET_SPEED = 10.0       # m/s — speed at which the target advances along the path
-MAX_LEAD = 10.0           # max distance target can be ahead of drone
-
 
 async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
@@ -56,82 +53,34 @@ async def run(drone, gates):
             hard_stop_gates.add(i)
     hard_stop_gates.discard(3)  # relax gate 3 — gate 4 hard stop handles alignment
 
-    # Time-based target: advances along path at TARGET_SPEED, pauses at hard stops
-    target_dist = 0.0  # cumulative distance along path the target has traveled
-    idx = 0            # current waypoint index (for gate-reached tracking)
-    dt = 1.0 / COMMAND_RATE_HZ
-
-    # Precompute cumulative path distances for each waypoint
-    cum_dist = [0.0]
-    for j in range(1, len(waypoints)):
-        seg_len = np.linalg.norm(waypoints[j] - waypoints[j - 1])
-        cum_dist.append(cum_dist[-1] + seg_len)
-
-    # Compute hard-stop distances (distance along path to hard-stop approach waypoints)
-    hard_stop_dists = set()
-    for gi in hard_stop_gates:
-        wp_idx = gi * 2  # approach waypoint index
-        if wp_idx < len(cum_dist):
-            hard_stop_dists.add(cum_dist[wp_idx])
-
+    idx = 0
     while idx < len(waypoints):
         position = await get_position(drone)
         if position is None:
-            await asyncio.sleep(dt)
+            await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
             continue
 
-        # Check if drone has reached current waypoint
         dist_to_wp = np.linalg.norm(waypoints[idx] - position)
         if dist_to_wp < GATE_REACHED_DIST:
             idx += 1
             continue
 
-        # Advance target along path (time-based)
-        # Find the next hard-stop distance
-        next_stop = float('inf')
-        for hd in hard_stop_dists:
-            if hd > target_dist + 0.1:
-                next_stop = min(next_stop, hd)
-
-        # Advance target, but stop at hard-stop approach points
-        advance = TARGET_SPEED * dt
-        target_dist = min(target_dist + advance, next_stop)
-
-        # Cap lead distance: target can't be more than MAX_LEAD ahead of drone
-        drone_path_dist = cum_dist[idx] - np.linalg.norm(waypoints[idx] - position)
-        if target_dist - drone_path_dist > MAX_LEAD:
-            target_dist = drone_path_dist + MAX_LEAD
-
-        # Release hard stop when drone reaches it
-        if target_dist in hard_stop_dists:
-            if drone_path_dist >= target_dist - 1.0:
-                pass  # target advances on next iteration when drone catches up
-
-        # Convert target_dist to 3D position
-        cmd_target = point_at_cumulative_dist(waypoints, cum_dist, target_dist)
+        cmd_target = walk_along_path(waypoints, idx, position, LOOKAHEAD,
+                                     hard_stop_gates)
 
         delta = cmd_target - position
         yaw_deg = math.degrees(math.atan2(delta[1], delta[0]))
 
         await drone.offboard.set_position_ned(
-            PositionNedYaw(cmd_target[0], cmd_target[1], cmd_target[2], yaw_deg)
+            PositionNedYaw(
+                north_m=cmd_target[0],
+                east_m=cmd_target[1],
+                down_m=cmd_target[2],
+                yaw_deg=yaw_deg,
+            )
         )
 
-        await asyncio.sleep(dt)
-
-
-def point_at_cumulative_dist(waypoints, cum_dist, target_dist):
-    """Get 3D position at cumulative distance along polyline."""
-    target_dist = max(0.0, min(target_dist, cum_dist[-1]))
-    for j in range(1, len(waypoints)):
-        if cum_dist[j] >= target_dist:
-            seg_start = cum_dist[j - 1]
-            seg_len = cum_dist[j] - seg_start
-            if seg_len < 0.001:
-                return waypoints[j].copy()
-            frac = (target_dist - seg_start) / seg_len
-            return waypoints[j - 1] + frac * (waypoints[j] - waypoints[j - 1])
-    return waypoints[-1].copy()
+        await asyncio.sleep(1.0 / COMMAND_RATE_HZ)
 
 
 def walk_along_path(waypoints, idx, position, lookahead, hard_stop_gates):
