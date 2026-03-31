@@ -52,7 +52,6 @@ async def run(drone, gates):
         if cos_angle <= EASY_TURN_THRESHOLD:
             hard_stop_gates.add(i)
     hard_stop_gates.discard(3)  # relax gate 3 — gate 4 hard stop handles alignment
-    hard_stop_gates.discard(4)  # relax gate 4 — gate 5 hard stop handles alignment
 
     idx = 0
     while idx < len(waypoints):
