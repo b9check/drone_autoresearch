@@ -32,12 +32,6 @@ EASY_TURN_THRESHOLD = 0.7  # cos(45°) — gates with gentler turns skip hard st
 
 async def run(drone, gates):
     """Fly through all gates using multi-waypoint path lookahead."""
-    # Increase PX4 max speed to break position controller ceiling
-    try:
-        await drone.action.set_maximum_speed(20.0)
-    except Exception:
-        pass  # not fatal if unsupported
-
     # Build waypoint sequence: approach + through per gate
     waypoints = []
     for gate in gates:
