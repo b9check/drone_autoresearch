@@ -367,7 +367,7 @@ PX4 parameters can be modified at runtime via MAVLink (PARAM_SET message) or via
 - MPC_ACC_HOR: max horizontal acceleration
 - MC_ROLLRATE_MAX, MC_PITCHRATE_MAX: max angular rates
 
-Increasing these allows more aggressive flight in position mode but may cause instability. If the competition sim allows parameter modification, this is a high-leverage optimization axis. If not, bypassing the position controller (attitude mode) is the path.
+Increasing these allows more aggressive flight in position mode but may cause instability. In PX4 SITL, these parameters can be modified at runtime via MAVLink PARAM_SET or through QGroundControl — this is confirmed and available for development. Whether the competition sim exposes equivalent parameters is unknown. If it does, this is a high-leverage optimization axis. If not, bypassing the position controller (attitude mode) is the path to higher performance.
 
 ---
 
@@ -418,6 +418,8 @@ The optimal approach to gate N depends on gates N+1 and N+2. A hard turn at gate
 ### 9.4 Gate Waypoint Patterns
 
 Placing auxiliary waypoints along the gate normal (before and after the gate center) creates a line through the gate that the drone can follow for reliable passage. The distance of these waypoints from the gate center, and whether they're used for all gates or only difficult ones, affects both reliability and path length.
+
+**Alignment cascade hazard**: In systems that combine lookahead-based path following with gate alignment waypoints, there is a general failure mode where lookahead "skips" an alignment waypoint, causing the drone to approach the gate at an unintended angle. This doesn't just affect the current gate — the wrong exit angle propagates to the next gate's approach, which propagates to the next, creating a cascading alignment failure that can cause misses several gates downstream of the original skip. This is an architectural property of lookahead + sequential alignment systems, not specific to any particular track or parameter value.
 
 ---
 

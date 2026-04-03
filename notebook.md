@@ -70,3 +70,14 @@ Empirical discoveries about the simulator, drone, track, and control problem. Th
 - **Adaptive lookahead** (speed-based): same failure mode as increased fixed lookahead. Any effective lookahead >10m on easy sections breaks gate 4.
 - **Current best: 10.27s**, commit fed9ef0, 10m lookahead + selective hard stops. Gate 8 at 1.35m from center (0.15m margin).
 - **Best score progression**: 21.2s → 20.3s → 18.5s → 17.1s → 16.6s → 16.4s → 14.1s → 13.3s → 13.2s → 10.5s → 10.27s.
+
+## 2026-03-30 — Session 3: Phase A+ Attempts and Gate 8 Fix
+
+- **Gate 8 approach 4m (was 3m)**: improved gate 8 margin from 1.48m to 1.23-1.25m (0.27m safety margin vs 0.02m). Score 10.1-10.2s. Reliable across 2 runs. The 30° heading mismatch from gate 7 needs more alignment room.
+- **Velocity feedforward (set_position_velocity_ned)**: aligned velocity direction with position target, magnitude proportional to distance. 7/8 gates — gate 8 missed. Velocity causes PX4 to take wider arcs. Zeroing velocity at hard stops makes it WORSE (3/8) — creates discontinuity.
+- **Hybrid VelocityNedYaw on easy through segments**: 12 m/s velocity on easy inter-gate segments. Improved speed slightly (10.2s vs 10.3s) but degraded gate 8 to 1.46-1.48m. Even with 4m gate 8 approach + velocity, gate 8 is inconsistent. Limiting velocity to early-course only (gates 0-2) showed no improvement.
+- **set_maximum_speed(20)**: no effect on PX4 position controller speed.
+- **Gate 0 optimization (1m approach, no hard stop)**: no effect — total path length unchanged because approach distance doesn't change total path when inter-gate direction roughly aligns with gate normal.
+- **Key insight**: reducing approach distance doesn't shorten the total path — it just shifts where the waypoint is on the same-length path. Velocity feedforward in any form is incompatible with this course's tight gate 8 alignment. Phase A position mode is definitively at its ceiling (~10.1s).
+- **Current best**: 10.1s, commit bc35de1, with 4m gate 8 approach.
+- **Best score progression**: ... → 10.27s → 10.1s (gate 8 fix).
